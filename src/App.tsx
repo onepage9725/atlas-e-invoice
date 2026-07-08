@@ -18,7 +18,7 @@ import { RankingPage } from "./components/RankingPage";
 import { RankProgressPage } from "./components/RankProgressPage";
 import { TeamPage } from "./components/TeamPage";
 import { AuthPage } from "./components/AuthPage";
-import { supabase } from "./lib/supabaseClient";
+import { isSupabaseConfigured, supabase } from "./lib/supabaseClient";
 
 const normalizeAccessValue = (value: string | null) =>
   value?.trim().toLowerCase().replace(/\s+/g, "_") ?? null;
@@ -66,6 +66,12 @@ function App() {
   };
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIsLoading(false);
+      clearSessionState();
+      return;
+    }
+
     const loadSession = async () => {
       const { data, error } = await supabase.auth.getSession();
 
@@ -116,6 +122,11 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIsProfileLoading(false);
+      return;
+    }
+
     const loadProfile = async () => {
       if (!sessionUserId) {
         setIsProfileLoading(false);
@@ -232,6 +243,27 @@ function App() {
     normalizedProfileRole === "pre_leader" ||
     normalizedProfileRole === "leader";
   const canViewMemberVoucher = !isSuperAdmin && !isAdmin && hasMemberVoucherAccessByRoleOrRank;
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-[var(--color-body)] flex items-center justify-center p-6">
+        <div className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-gray-900">Configuration required</h1>
+          <p className="mt-3 text-sm text-gray-700">
+            This deployment is missing required Supabase environment variables.
+          </p>
+          <div className="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-800">
+            <p>Add these variables in Vercel Project Settings - Environment Variables:</p>
+            <p className="mt-2 font-mono">VITE_SUPABASE_URL</p>
+            <p className="font-mono">VITE_SUPABASE_ANON_KEY</p>
+          </div>
+          <p className="mt-4 text-xs text-gray-500">
+            After saving, redeploy and refresh this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading || (sessionUserId !== null && isProfileLoading)) {
     return (
