@@ -44,6 +44,13 @@ type InvoiceLineDraft = {
   commissionRate: string;
 };
 
+type PendingDeleteReceiveBatch = {
+  batchId: string;
+  receiptName: string;
+  amount: number;
+  receiveDate: string;
+};
+
 const DEFAULT_TAX_RATE = 8;
 
 const emptyLine = (): InvoiceLineDraft => ({
@@ -142,6 +149,8 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   const [receiveDateDraft, setReceiveDateDraft] = useState("");
   const [receiveReceiptFile, setReceiveReceiptFile] = useState<File | null>(null);
   const [receiveFileInputKey, setReceiveFileInputKey] = useState(0);
+  const [pendingDeleteBatch, setPendingDeleteBatch] = useState<PendingDeleteReceiveBatch | null>(null);
+  const [deleteBatchConfirmationText, setDeleteBatchConfirmationText] = useState("");
 
   const resetForm = () => {
     setEditingRecordId(null);
@@ -169,6 +178,8 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     setReceiveAmountDraft("");
     setReceiveDateDraft("");
     setReceiveReceiptFile(null);
+    setPendingDeleteBatch(null);
+    setDeleteBatchConfirmationText("");
     setReceiveFileInputKey((prev) => prev + 1);
   };
 
@@ -418,11 +429,12 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
       return;
     }
 
-    const confirmation = window.prompt(
-      "This will delete this received batch and its receipt attachment. Type CONFIRM to continue."
-    );
+    if (!pendingDeleteBatch || pendingDeleteBatch.batchId !== batchId) {
+      return;
+    }
 
-    if (confirmation !== "CONFIRM") {
+    if (deleteBatchConfirmationText !== "CONFIRM") {
+      setError('Please type "CONFIRM" before deleting this received batch.');
       return;
     }
 
@@ -476,9 +488,23 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     };
 
     setReceivingRecord(updatedRecord);
+    setPendingDeleteBatch(null);
+    setDeleteBatchConfirmationText("");
     setSuccess("Received batch deleted.");
     setIsReceiving(false);
     await loadRecords();
+  };
+
+  const openDeleteBatchModal = (batch: EInvoiceReceiveBatch) => {
+    setPendingDeleteBatch({
+      batchId: batch.id,
+      receiptName: batch.receipt_name,
+      amount: batch.amount,
+      receiveDate: batch.receive_date ?? new Date(batch.received_at).toLocaleDateString("en-MY"),
+    });
+    setDeleteBatchConfirmationText("");
+    setError(null);
+    setSuccess(null);
   };
 
   const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -937,7 +963,8 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                           <td className="px-4 py-2 text-right">
                             <button
                               type="button"
-                              onClick={() => void handleDeleteReceiveBatch(batch.id)}
+                              onClick={() => openDeleteBatchModal(batch)}
+                              disabled={isReceiving}
                               className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:text-red-700"
                             >
                               Delete
@@ -975,6 +1002,68 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isReceiveModalOpen && receivingRecord && pendingDeleteBatch && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-100 bg-white shadow-xl">
+            <div className="border-b border-gray-100 px-5 py-4">
+              <h3 className="text-lg font-semibold text-gray-800">Confirm deletion</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Deleting this receive batch will remove the receipt from the table and permanently delete the attachment file from storage.
+              </p>
+            </div>
+
+            <div className="space-y-1 px-5 py-4 text-sm text-gray-600">
+              <div>
+                Invoice: <span className="font-medium text-gray-800">{receivingRecord.invoice_number}</span>
+              </div>
+              <div>
+                Receive Date: <span className="font-medium text-gray-800">{pendingDeleteBatch.receiveDate}</span>
+              </div>
+              <div>
+                Amount: <span className="font-medium text-gray-800">RM {formatAmount(pendingDeleteBatch.amount)}</span>
+              </div>
+              <div>
+                Receipt: <span className="font-medium text-gray-800">{pendingDeleteBatch.receiptName}</span>
+              </div>
+
+              <div className="pt-3">
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Type <span className="font-semibold">CONFIRM</span> to delete this received batch
+                </label>
+                <input
+                  type="text"
+                  value={deleteBatchConfirmationText}
+                  onChange={(event) => setDeleteBatchConfirmationText(event.target.value)}
+                  placeholder="CONFIRM"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingDeleteBatch(null);
+                  setDeleteBatchConfirmationText("");
+                }}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteReceiveBatch(pendingDeleteBatch.batchId)}
+                disabled={isReceiving || deleteBatchConfirmationText !== "CONFIRM"}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {isReceiving ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
           </div>
         </div>
       )}
