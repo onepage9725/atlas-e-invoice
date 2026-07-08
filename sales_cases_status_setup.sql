@@ -573,6 +573,12 @@ create table if not exists public.e_invoices (
   updated_at timestamptz not null default now()
 );
 
+alter table public.e_invoices
+  add column if not exists received_amount numeric not null default 0;
+
+alter table public.e_invoices
+  add column if not exists receive_batches jsonb not null default '[]'::jsonb;
+
 create index if not exists e_invoices_invoice_date_idx
   on public.e_invoices (invoice_date desc);
 

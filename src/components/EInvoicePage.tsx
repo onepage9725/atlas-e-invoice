@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FilePlus2, Pencil, Trash2, Sparkles, X, Download } from "lucide-react";
+import { FilePlus2, HandCoins, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { generateEInvoicePDF } from "../lib/pdfGenerator";
 
@@ -17,8 +17,19 @@ export type EInvoiceRecord = {
   bill_to: string;
   tax_rate: number;
   line_items: EInvoiceLineItem[] | null;
+  received_amount?: number | null;
+  receive_batches?: EInvoiceReceiveBatch[] | null;
   created_at: string;
   updated_at: string;
+};
+
+export type EInvoiceReceiveBatch = {
+  id: string;
+  amount: number;
+  receipt_url: string;
+  receipt_name: string;
+  received_at: string;
+  received_by: string | null;
 };
 
 type EInvoicePageProps = {
@@ -55,6 +66,20 @@ const toNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const sanitizeFileName = (name: string) =>
+  name
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9_.-]/g, "");
+
+const isValidReceiptFile = (file: File) => {
+  const type = file.type.toLowerCase();
+  if (type === "application/pdf") {
+    return true;
+  }
+  return type.startsWith("image/");
+};
+
 const calculateLine = (line: InvoiceLineDraft, taxRate: number) => {
   const qty = toNumber(line.qty);
   const nettPrice = toNumber(line.nettPrice);
@@ -79,13 +104,19 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isReceiving, setIsReceiving] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [receivingRecord, setReceivingRecord] = useState<EInvoiceRecord | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [billTo, setBillTo] = useState("");
   const [lineDrafts, setLineDrafts] = useState<InvoiceLineDraft[]>([emptyLine()]);
+  const [receiveAmountDraft, setReceiveAmountDraft] = useState("");
+  const [receiveReceiptFile, setReceiveReceiptFile] = useState<File | null>(null);
+  const [receiveFileInputKey, setReceiveFileInputKey] = useState(0);
 
   const resetForm = () => {
     setEditingRecordId(null);
@@ -107,12 +138,59 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     resetForm();
   };
 
+  const closeReceiveModal = () => {
+    setIsReceiveModalOpen(false);
+    setReceivingRecord(null);
+    setReceiveAmountDraft("");
+    setReceiveReceiptFile(null);
+    setReceiveFileInputKey((prev) => prev + 1);
+  };
+
+  const getLineItems = (record: EInvoiceRecord) => record.line_items ?? [];
+
+  const getInvoiceTotalInclude = (record: EInvoiceRecord) =>
+    getLineItems(record).reduce((sum, line) => {
+      const include = Number((line.qty * line.nett_price * (line.commission_rate / 100)).toFixed(2));
+      return sum + include;
+    }, 0);
+
+  const getReceiveBatches = (record: EInvoiceRecord): EInvoiceReceiveBatch[] => {
+    if (!Array.isArray(record.receive_batches)) {
+      return [];
+    }
+
+    return record.receive_batches.filter(
+      (batch): batch is EInvoiceReceiveBatch =>
+        Boolean(batch) &&
+        typeof batch.id === "string" &&
+        typeof batch.amount === "number" &&
+        typeof batch.receipt_url === "string" &&
+        typeof batch.receipt_name === "string" &&
+        typeof batch.received_at === "string"
+    );
+  };
+
+  const getReceivedAmount = (record: EInvoiceRecord) => {
+    if (typeof record.received_amount === "number" && Number.isFinite(record.received_amount)) {
+      return Number(record.received_amount.toFixed(2));
+    }
+
+    const batches = getReceiveBatches(record);
+    const total = batches.reduce((sum, batch) => sum + batch.amount, 0);
+    return Number(total.toFixed(2));
+  };
+
+  const getOutstandingAmount = (record: EInvoiceRecord) => {
+    const outstanding = getInvoiceTotalInclude(record) - getReceivedAmount(record);
+    return Number(Math.max(outstanding, 0).toFixed(2));
+  };
+
   const loadRecords = async () => {
     setError(null);
 
     const { data, error: fetchError } = await supabase
       .from("e_invoices")
-      .select("id, invoice_number, invoice_date, bill_to, tax_rate, line_items, created_at, updated_at")
+      .select("*")
       .order("invoice_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -210,6 +288,96 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     } catch (err: any) {
       setError("Failed to generate PDF: " + err.message);
     }
+  };
+
+  const handleOpenReceiveModal = (record: EInvoiceRecord) => {
+    setReceivingRecord(record);
+    setReceiveAmountDraft("");
+    setReceiveReceiptFile(null);
+    setReceiveFileInputKey((prev) => prev + 1);
+    setError(null);
+    setSuccess(null);
+    setIsReceiveModalOpen(true);
+  };
+
+  const handleSaveReceive = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (!receivingRecord) {
+      setError("No e-invoice selected.");
+      return;
+    }
+
+    const amount = Number(receiveAmountDraft);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Please enter a valid receive amount.");
+      return;
+    }
+
+    if (!receiveReceiptFile) {
+      setError("Please attach a receipt file (image or PDF).");
+      return;
+    }
+
+    if (!isValidReceiptFile(receiveReceiptFile)) {
+      setError("Receipt file must be an image or PDF.");
+      return;
+    }
+
+    const outstanding = getOutstandingAmount(receivingRecord);
+    if (amount > outstanding + 0.01) {
+      setError(`Receive amount cannot exceed outstanding balance (RM ${formatAmount(outstanding)}).`);
+      return;
+    }
+
+    setIsReceiving(true);
+
+    const filePath = `e-invoice-receipts/${userId}/${receivingRecord.id}/${Date.now()}-${sanitizeFileName(receiveReceiptFile.name)}`;
+    const { error: uploadError } = await supabase.storage.from("cases").upload(filePath, receiveReceiptFile, {
+      upsert: false,
+    });
+
+    if (uploadError) {
+      setError(uploadError.message);
+      setIsReceiving(false);
+      return;
+    }
+
+    const { data: uploadData } = supabase.storage.from("cases").getPublicUrl(filePath);
+    const existingBatches = getReceiveBatches(receivingRecord);
+    const nextBatch: EInvoiceReceiveBatch = {
+      id: crypto.randomUUID(),
+      amount: Number(amount.toFixed(2)),
+      receipt_url: uploadData.publicUrl,
+      receipt_name: receiveReceiptFile.name,
+      received_at: new Date().toISOString(),
+      received_by: userId,
+    };
+    const nextBatches = [...existingBatches, nextBatch];
+    const nextReceivedAmount = Number((getReceivedAmount(receivingRecord) + amount).toFixed(2));
+
+    const { error: updateError } = await supabase
+      .from("e_invoices")
+      .update({
+        received_amount: nextReceivedAmount,
+        receive_batches: nextBatches,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", receivingRecord.id);
+
+    if (updateError) {
+      await supabase.storage.from("cases").remove([filePath]).catch(() => undefined);
+      setError(updateError.message);
+      setIsReceiving(false);
+      return;
+    }
+
+    setSuccess("Received batch recorded successfully.");
+    setIsReceiving(false);
+    closeReceiveModal();
+    await loadRecords();
   };
 
   const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -331,17 +499,17 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                 <th className="px-4 py-2">Bill To</th>
                 <th className="px-4 py-2">Items</th>
                 <th className="px-4 py-2">Total Include SST (RM)</th>
-                <th className="px-4 py-2 text-center">Download</th>
+                <th className="px-4 py-2">Received Amount (RM)</th>
+                <th className="px-4 py-2 text-center">Receive</th>
                 <th className="px-4 py-2 text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {records.map((record) => {
-                const lineItems = record.line_items ?? [];
-                const totalInclude = lineItems.reduce((sum, line) => {
-                  const include = Number((line.qty * line.nett_price * (line.commission_rate / 100)).toFixed(2));
-                  return sum + include;
-                }, 0);
+                const lineItems = getLineItems(record);
+                const totalInclude = getInvoiceTotalInclude(record);
+                const receivedAmount = getReceivedAmount(record);
+                const outstandingAmount = getOutstandingAmount(record);
 
                 return (
                   <tr key={record.id} className="border-b border-gray-50">
@@ -350,14 +518,20 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                     <td className="px-4 py-3 text-gray-700">{record.bill_to}</td>
                     <td className="px-4 py-3 text-gray-700">{lineItems.length}</td>
                     <td className="px-4 py-3 text-gray-700">RM {formatAmount(totalInclude)}</td>
+                    <td className="px-4 py-3 text-gray-700">
+                      <div className="flex flex-col">
+                        <span>RM {formatAmount(receivedAmount)}</span>
+                        <span className="text-xs text-gray-500">Outstanding: RM {formatAmount(outstandingAmount)}</span>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <button
                         type="button"
-                        onClick={() => handleGenerate(record)}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:text-gray-900"
+                        onClick={() => handleOpenReceiveModal(record)}
+                        className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:text-amber-800"
                       >
-                        <Download className="h-3.5 w-3.5" />
-                        Download
+                        <HandCoins className="h-3.5 w-3.5" />
+                        Receive
                       </button>
                     </td>
                     <td className="px-4 py-3">
@@ -395,7 +569,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
 
               {records.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-gray-500">
+                  <td colSpan={8} className="py-6 text-center text-gray-500">
                     No e-invoice rows found.
                   </td>
                 </tr>
@@ -569,6 +743,113 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                 >
                   {isSaving ? "Saving..." : editingRecordId ? "Save Changes" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isReceiveModalOpen && receivingRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Receive Payment Batch</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Invoice {receivingRecord.invoice_number} · Outstanding RM {formatAmount(getOutstandingAmount(receivingRecord))}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeReceiveModal}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReceive} className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">RECEIVE AMOUNT (RM)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={receiveAmountDraft}
+                    onChange={(event) => setReceiveAmountDraft(event.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    placeholder="e.g. 5000"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">RECEIPT (IMAGE OR PDF)</label>
+                  <input
+                    key={receiveFileInputKey}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(event) => setReceiveReceiptFile(event.target.files?.[0] ?? null)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200">
+                <div className="border-b border-gray-100 px-4 py-2 text-xs font-semibold text-gray-700">Received Batches</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm whitespace-nowrap">
+                    <thead>
+                      <tr className="text-left text-gray-500">
+                        <th className="px-4 py-2">Date</th>
+                        <th className="px-4 py-2">Amount (RM)</th>
+                        <th className="px-4 py-2">Receipt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getReceiveBatches(receivingRecord).map((batch) => (
+                        <tr key={batch.id} className="border-t border-gray-100">
+                          <td className="px-4 py-2 text-gray-700">{new Date(batch.received_at).toLocaleString("en-MY")}</td>
+                          <td className="px-4 py-2 text-gray-700">RM {formatAmount(batch.amount)}</td>
+                          <td className="px-4 py-2">
+                            <a
+                              href={batch.receipt_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              {batch.receipt_name}
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {getReceiveBatches(receivingRecord).length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="px-4 py-4 text-center text-gray-500">
+                            No received batches yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeReceiveModal}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isReceiving}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {isReceiving ? "Saving..." : "Save Receive"}
                 </button>
               </div>
             </form>
