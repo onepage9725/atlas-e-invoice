@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FilePlus2, HandCoins, Pencil, Sparkles, Trash2, X } from "lucide-react";
+import { FilePlus2, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { generateEInvoicePDF } from "../lib/pdfGenerator";
 
@@ -140,6 +140,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [pendingDeleteInvoice, setPendingDeleteInvoice] = useState<EInvoiceRecord | null>(null);
   const [receivingRecord, setReceivingRecord] = useState<EInvoiceRecord | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
@@ -317,6 +318,15 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     await loadRecords();
   };
 
+  const handleConfirmDeleteInvoice = async () => {
+    if (!pendingDeleteInvoice) {
+      return;
+    }
+
+    await handleDelete(pendingDeleteInvoice.id);
+    setPendingDeleteInvoice(null);
+  };
+
   const handleGenerate = async (record: EInvoiceRecord) => {
     try {
       await generateEInvoicePDF(record);
@@ -325,17 +335,6 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     } catch (err: any) {
       setError("Failed to generate PDF: " + err.message);
     }
-  };
-
-  const handleOpenReceiveModal = (record: EInvoiceRecord) => {
-    setReceivingRecord(record);
-    setReceiveAmountDraft("");
-    setReceiveDateDraft(new Date().toISOString().slice(0, 10));
-    setReceiveReceiptFile(null);
-    setReceiveFileInputKey((prev) => prev + 1);
-    setError(null);
-    setSuccess(null);
-    setIsReceiveModalOpen(true);
   };
 
   const handleSaveReceive = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -626,8 +625,6 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                 <th className="px-4 py-2">Bill To</th>
                 <th className="px-4 py-2">Items</th>
                 <th className="px-4 py-2">Total Include SST (RM)</th>
-                <th className="px-4 py-2">Received Amount (RM)</th>
-                <th className="px-4 py-2 text-center">Receive</th>
                 <th className="px-4 py-2 text-right">Action</th>
               </tr>
             </thead>
@@ -635,8 +632,6 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
               {records.map((record) => {
                 const lineItems = getLineItems(record);
                 const totalInclude = getInvoiceTotalInclude(record);
-                const receivedAmount = getReceivedAmount(record);
-                const outstandingAmount = getOutstandingAmount(record);
 
                 return (
                   <tr key={record.id} className="border-b border-gray-50">
@@ -645,22 +640,6 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                     <td className="px-4 py-3 text-gray-700">{record.bill_to}</td>
                     <td className="px-4 py-3 text-gray-700">{lineItems.length}</td>
                     <td className="px-4 py-3 text-gray-700">RM {formatAmount(totalInclude)}</td>
-                    <td className="px-4 py-3 text-gray-700">
-                      <div className="flex flex-col">
-                        <span>RM {formatAmount(receivedAmount)}</span>
-                        <span className="text-xs text-gray-500">Outstanding: RM {formatAmount(outstandingAmount)}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenReceiveModal(record)}
-                        className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:text-amber-800"
-                      >
-                        <HandCoins className="h-3.5 w-3.5" />
-                        Receive
-                      </button>
-                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -673,7 +652,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDelete(record.id)}
+                          onClick={() => setPendingDeleteInvoice(record)}
                           disabled={isDeleting === record.id}
                           className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-60"
                         >
@@ -696,7 +675,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
 
               {records.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-6 text-center text-gray-500">
+                  <td colSpan={6} className="py-6 text-center text-gray-500">
                     No e-invoice rows found.
                   </td>
                 </tr>
@@ -705,6 +684,49 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
           </table>
         </div>
       </div>
+
+      {pendingDeleteInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-100 bg-white shadow-xl">
+            <div className="border-b border-gray-100 px-5 py-4">
+              <h3 className="text-lg font-semibold text-gray-800">Confirm delete</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Are you sure you want to delete this e-invoice row?
+              </p>
+            </div>
+
+            <div className="space-y-1 px-5 py-4 text-sm text-gray-600">
+              <div>
+                Invoice: <span className="font-medium text-gray-800">{pendingDeleteInvoice.invoice_number}</span>
+              </div>
+              <div>
+                Date: <span className="font-medium text-gray-800">{pendingDeleteInvoice.invoice_date}</span>
+              </div>
+              <div>
+                Bill To: <span className="font-medium text-gray-800">{pendingDeleteInvoice.bill_to}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteInvoice(null)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmDeleteInvoice()}
+                disabled={isDeleting === pendingDeleteInvoice.id}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {isDeleting === pendingDeleteInvoice.id ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
