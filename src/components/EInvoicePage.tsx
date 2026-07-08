@@ -29,6 +29,7 @@ export type EInvoiceReceiveBatch = {
   receipt_url: string;
   receipt_name: string;
   received_at: string;
+  receive_date?: string;
   received_by: string | null;
 };
 
@@ -80,6 +81,29 @@ const isValidReceiptFile = (file: File) => {
   return type.startsWith("image/");
 };
 
+const getStoragePathFromUrl = (url: string | null, bucket: string) => {
+  if (!url) return null;
+
+  const markers = [
+    `/storage/v1/object/public/${bucket}/`,
+    `/storage/v1/object/sign/${bucket}/`,
+    `/storage/v1/object/${bucket}/`,
+  ];
+
+  for (const marker of markers) {
+    const index = url.indexOf(marker);
+    if (index !== -1) {
+      return decodeURIComponent(url.slice(index + marker.length).split("?")[0]);
+    }
+  }
+
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return decodeURIComponent(url.split("?")[0]);
+  }
+
+  return null;
+};
+
 const calculateLine = (line: InvoiceLineDraft, taxRate: number) => {
   const qty = toNumber(line.qty);
   const nettPrice = toNumber(line.nettPrice);
@@ -115,6 +139,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   const [billTo, setBillTo] = useState("");
   const [lineDrafts, setLineDrafts] = useState<InvoiceLineDraft[]>([emptyLine()]);
   const [receiveAmountDraft, setReceiveAmountDraft] = useState("");
+  const [receiveDateDraft, setReceiveDateDraft] = useState("");
   const [receiveReceiptFile, setReceiveReceiptFile] = useState<File | null>(null);
   const [receiveFileInputKey, setReceiveFileInputKey] = useState(0);
 
@@ -142,6 +167,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     setIsReceiveModalOpen(false);
     setReceivingRecord(null);
     setReceiveAmountDraft("");
+    setReceiveDateDraft("");
     setReceiveReceiptFile(null);
     setReceiveFileInputKey((prev) => prev + 1);
   };
@@ -293,6 +319,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   const handleOpenReceiveModal = (record: EInvoiceRecord) => {
     setReceivingRecord(record);
     setReceiveAmountDraft("");
+    setReceiveDateDraft(new Date().toISOString().slice(0, 10));
     setReceiveReceiptFile(null);
     setReceiveFileInputKey((prev) => prev + 1);
     setError(null);
@@ -313,6 +340,11 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     const amount = Number(receiveAmountDraft);
     if (!Number.isFinite(amount) || amount <= 0) {
       setError("Please enter a valid receive amount.");
+      return;
+    }
+
+    if (!receiveDateDraft) {
+      setError("Please choose receive date.");
       return;
     }
 
@@ -352,7 +384,8 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
       amount: Number(amount.toFixed(2)),
       receipt_url: uploadData.publicUrl,
       receipt_name: receiveReceiptFile.name,
-      received_at: new Date().toISOString(),
+      received_at: new Date(`${receiveDateDraft}T00:00:00.000Z`).toISOString(),
+      receive_date: receiveDateDraft,
       received_by: userId,
     };
     const nextBatches = [...existingBatches, nextBatch];
@@ -377,6 +410,74 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
     setSuccess("Received batch recorded successfully.");
     setIsReceiving(false);
     closeReceiveModal();
+    await loadRecords();
+  };
+
+  const handleDeleteReceiveBatch = async (batchId: string) => {
+    if (!receivingRecord) {
+      return;
+    }
+
+    const confirmation = window.prompt(
+      "This will delete this received batch and its receipt attachment. Type CONFIRM to continue."
+    );
+
+    if (confirmation !== "CONFIRM") {
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setIsReceiving(true);
+
+    const existingBatches = getReceiveBatches(receivingRecord);
+    const targetBatch = existingBatches.find((batch) => batch.id === batchId);
+
+    if (!targetBatch) {
+      setError("Unable to find selected batch.");
+      setIsReceiving(false);
+      return;
+    }
+
+    const nextBatches = existingBatches.filter((batch) => batch.id !== batchId);
+    const nextReceivedAmount = Number(nextBatches.reduce((sum, batch) => sum + batch.amount, 0).toFixed(2));
+
+    const { error: updateError } = await supabase
+      .from("e_invoices")
+      .update({
+        received_amount: nextReceivedAmount,
+        receive_batches: nextBatches,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", receivingRecord.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setIsReceiving(false);
+      return;
+    }
+
+    const storagePath = getStoragePathFromUrl(targetBatch.receipt_url, "cases");
+    if (storagePath) {
+      const { error: storageError } = await supabase.storage.from("cases").remove([storagePath]);
+      if (storageError) {
+        setError(`Batch deleted, but failed to delete attachment from storage: ${storageError.message}`);
+        setIsReceiving(false);
+        await loadRecords();
+        return;
+      }
+    }
+
+    const updatedRecord: EInvoiceRecord = {
+      ...receivingRecord,
+      receive_batches: nextBatches,
+      received_amount: nextReceivedAmount,
+      updated_at: new Date().toISOString(),
+    };
+
+    setReceivingRecord(updatedRecord);
+    setSuccess("Received batch deleted.");
+    setIsReceiving(false);
     await loadRecords();
   };
 
@@ -784,6 +885,15 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                   />
                 </div>
                 <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">RECEIVE DATE</label>
+                  <input
+                    type="date"
+                    value={receiveDateDraft}
+                    onChange={(event) => setReceiveDateDraft(event.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="md:col-span-2">
                   <label className="mb-1 block text-xs font-medium text-gray-700">RECEIPT (IMAGE OR PDF)</label>
                   <input
                     key={receiveFileInputKey}
@@ -801,15 +911,18 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead>
                       <tr className="text-left text-gray-500">
-                        <th className="px-4 py-2">Date</th>
+                        <th className="px-4 py-2">Receive Date</th>
                         <th className="px-4 py-2">Amount (RM)</th>
                         <th className="px-4 py-2">Receipt</th>
+                        <th className="px-4 py-2 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {getReceiveBatches(receivingRecord).map((batch) => (
                         <tr key={batch.id} className="border-t border-gray-100">
-                          <td className="px-4 py-2 text-gray-700">{new Date(batch.received_at).toLocaleString("en-MY")}</td>
+                          <td className="px-4 py-2 text-gray-700">
+                            {batch.receive_date ?? new Date(batch.received_at).toLocaleDateString("en-MY")}
+                          </td>
                           <td className="px-4 py-2 text-gray-700">RM {formatAmount(batch.amount)}</td>
                           <td className="px-4 py-2">
                             <a
@@ -821,12 +934,21 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                               {batch.receipt_name}
                             </a>
                           </td>
+                          <td className="px-4 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteReceiveBatch(batch.id)}
+                              className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:text-red-700"
+                            >
+                              Delete
+                            </button>
+                          </td>
                         </tr>
                       ))}
 
                       {getReceiveBatches(receivingRecord).length === 0 && (
                         <tr>
-                          <td colSpan={3} className="px-4 py-4 text-center text-gray-500">
+                          <td colSpan={4} className="px-4 py-4 text-center text-gray-500">
                             No received batches yet.
                           </td>
                         </tr>
