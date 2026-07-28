@@ -1,6 +1,7 @@
 import {
   getCaseCommissionStructure,
   getDirectCommissionPercentage,
+  getHoldingCommissionPercentage,
 } from "./commissionStructures";
 import { buildCommissionStructureByTotalPercentage } from "./salesCasePayouts";
 import type { ProjectOption, SalesCasePayoutRecord, SalesCaseRecord } from "../components/SalesCaseModal";
@@ -126,15 +127,42 @@ export const getCaseCommissionAmountForProfile = (
   }
 
   const commissionStructure = getCaseCommissionStructure(record, project);
+
   if (!commissionStructure) {
     return 0;
   }
 
-  const directPercentage = getDirectCommissionPercentage(commissionStructure);
-  const directCommissionStructure = buildCommissionStructureByTotalPercentage(
+  return getCaseCommissionAmountForProfileByTotalPercentage(
+    record,
+    project,
+    profiles,
+    profileId,
+    getDirectCommissionPercentage(commissionStructure),
+    "direct"
+  );
+};
+
+const getCaseCommissionAmountForProfileByTotalPercentage = (
+  record: SalesCaseRecord,
+  project: ProjectOption | null | undefined,
+  profiles: CommissionProfile[],
+  profileId: string,
+  targetTotalPercentage: number,
+  structureSuffix: string
+) => {
+  if (!profileId) {
+    return 0;
+  }
+
+  const commissionStructure = getCaseCommissionStructure(record, project);
+  if (!commissionStructure) {
+    return 0;
+  }
+
+  const scopedCommissionStructure = buildCommissionStructureByTotalPercentage(
     commissionStructure,
-    directPercentage,
-    `${commissionStructure.id}-direct`,
+    targetTotalPercentage,
+    `${commissionStructure.id}-${structureSuffix}`,
     commissionStructure.label,
   );
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
@@ -143,7 +171,7 @@ export const getCaseCommissionAmountForProfile = (
   const involvedUserId = getStoredInvolvedProfileId(record);
   const involvedProfile = involvedUserId ? profileMap.get(involvedUserId) ?? null : null;
 
-  if (!project || !viewerProfile || !directCommissionStructure) {
+  if (!project || !viewerProfile || !scopedCommissionStructure) {
     return 0;
   }
 
@@ -157,9 +185,9 @@ export const getCaseCommissionAmountForProfile = (
     return 0;
   }
 
-  const splitAgentPercentage = (directCommissionStructure.agent_commission ?? 0) / participantIds.length;
-  const splitPreLeaderPercentage = (directCommissionStructure.pre_leader_override ?? 0) / participantIds.length;
-  const splitLeaderPercentage = (directCommissionStructure.leader_override ?? 0) / participantIds.length;
+  const splitAgentPercentage = (scopedCommissionStructure.agent_commission ?? 0) / participantIds.length;
+  const splitPreLeaderPercentage = (scopedCommissionStructure.pre_leader_override ?? 0) / participantIds.length;
+  const splitLeaderPercentage = (scopedCommissionStructure.leader_override ?? 0) / participantIds.length;
   let totalPercentage = 0;
 
   participants.forEach((participant) => {
@@ -203,6 +231,32 @@ export const getCaseCommissionAmountForProfile = (
   return (record.nett_price ?? 0) * (totalPercentage / 100);
 };
 
+export const getCaseHoldingCommissionAmountForProfile = (
+  record: SalesCaseRecord,
+  project: ProjectOption | null | undefined,
+  profiles: CommissionProfile[],
+  profileId: string
+) => {
+  if (!profileId) {
+    return 0;
+  }
+
+  const commissionStructure = getCaseCommissionStructure(record, project);
+
+  if (!commissionStructure) {
+    return 0;
+  }
+
+  return getCaseCommissionAmountForProfileByTotalPercentage(
+    record,
+    project,
+    profiles,
+    profileId,
+    getHoldingCommissionPercentage(commissionStructure),
+    "holding"
+  );
+};
+
 export const getCaseCommissionAmountForProfiles = (
   record: SalesCaseRecord,
   project: ProjectOption | null | undefined,
@@ -213,6 +267,20 @@ export const getCaseCommissionAmountForProfiles = (
 
   return Array.from(scopedIds).reduce(
     (sum, profileId) => sum + getCaseCommissionAmountForProfile(record, project, profiles, profileId),
+    0
+  );
+};
+
+export const getCaseHoldingCommissionAmountForProfiles = (
+  record: SalesCaseRecord,
+  project: ProjectOption | null | undefined,
+  profiles: CommissionProfile[],
+  profileIds: Iterable<string>
+) => {
+  const scopedIds = new Set(profileIds);
+
+  return Array.from(scopedIds).reduce(
+    (sum, profileId) => sum + getCaseHoldingCommissionAmountForProfile(record, project, profiles, profileId),
     0
   );
 };
