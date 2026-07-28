@@ -1352,9 +1352,9 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
       });
 
       const payoutById = new Map(basePayouts.map((payout) => [payout.id, payout]));
-      const teamMemberIds = Array.from(teamIdSet);
+      const teamMemberIdList = Array.from(teamIdSet);
 
-      const matchesSelectedMonthAndProject = (record: SalesCaseRecord) => {
+      const isCaseInCurrentFilter = (record: SalesCaseRecord) => {
         if (selectedProjectId !== "all" && record.project_id !== selectedProjectId) {
           return false;
         }
@@ -1367,10 +1367,19 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
         return getDateMonthValue(caseCreatedAt) === selectedMonth;
       };
 
+      const isPayoutInCurrentMonth = (payout: SalesCasePayoutRecord) => {
+        if (!selectedMonth) {
+          return true;
+        }
+
+        const payoutCreatedAt = payout.created_at ? new Date(payout.created_at) : null;
+        return getDateMonthValue(payoutCreatedAt) === selectedMonth;
+      };
+
       const computeMemberConverted = (profileId: string) => {
         const memberCaseRows = cases.filter((record) => {
           const relatedIds = [record.created_by, ...(record.involved_user_ids ?? []), getStoredInvolvedProfileId(record)].filter(Boolean) as string[];
-          return relatedIds.includes(profileId) && matchesSelectedMonthAndProject(record);
+          return relatedIds.includes(profileId) && isCaseInCurrentFilter(record);
         });
 
         const memberCaseIds = new Set(memberCaseRows.map((record) => record.id));
@@ -1387,23 +1396,13 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
             (payout) => payout.payout_type !== "tier_upgrade_top_up"
           );
           const viewerPayout = standardRelatedPayouts.find((payout) => payout.profile_id === profileId) ?? null;
-          const baseStatus = normalizeCaseStatus(record.status);
-          const displayStatus = viewerPayout?.payout_status === "Paid" ? "Completed" : baseStatus;
+          const displayStatus = viewerPayout?.payout_status === "Paid" ? "Completed" : normalizeCaseStatus(record.status);
 
           if (displayStatus !== "Completed") {
             return sum;
           }
 
-          const computedDirectAmount = getCaseCommissionAmountForProfiles(record, project, profiles, [profileId]);
-          const standardPayoutAmountFallback = standardRelatedPayouts
-            .filter((payout) => payout.profile_id === profileId)
-            .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
-          const directAmount =
-            computedDirectAmount > 0
-              ? computedDirectAmount
-              : standardPayoutAmountFallback > 0
-                ? standardPayoutAmountFallback
-                : Number(viewerPayout?.total_amount ?? 0);
+          const directAmount = getCaseCommissionAmountForProfiles(record, project, profiles, [profileId]);
           const hasReleasedHoldingTopUp = allRelatedPayouts.some(
             (payout) => payout.profile_id === profileId && isReleasedHoldingPayout(payout)
           );
@@ -1411,59 +1410,22 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
             ? 0
             : getCaseHoldingCommissionAmountForProfile(record, project, profiles, profileId);
 
-          return sum + directAmount + holdingAmount;
-        }, 0);
-
-        const paidStandardConverted = memberCaseRows.reduce((sum, record) => {
-          const relatedPayouts = basePayoutMap.get(record.id) ?? [];
-          const paidStandardForMember = relatedPayouts
-            .filter(
-              (payout) =>
-                payout.payout_type === "standard" &&
-                payout.profile_id === profileId &&
-                payout.payout_status === "Paid"
-            )
-            .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
-
-          return sum + paidStandardForMember;
-        }, 0);
-
-        const completedCaseStandardConverted = memberCaseRows.reduce((sum, record) => {
-          if (normalizeCaseStatus(record.status) !== "Completed") {
-            return sum;
-          }
-
-          const relatedPayouts = basePayoutMap.get(record.id) ?? [];
-          const standardForMember = relatedPayouts
-            .filter(
-              (payout) =>
-                payout.payout_type === "standard" &&
-                payout.profile_id === profileId
-            )
-            .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
-
-          return sum + standardForMember;
+          return sum + directAmount + (holdingAmount > 0 ? holdingAmount : 0);
         }, 0);
 
         const topUpConverted = basePayouts
-          .filter((payout) => payout.payout_type === "tier_upgrade_top_up" && payout.profile_id === profileId)
+          .filter(
+            (payout) =>
+              payout.payout_type === "tier_upgrade_top_up" &&
+              payout.profile_id === profileId &&
+              payout.payout_status === "Paid" &&
+              isPayoutInCurrentMonth(payout)
+          )
           .reduce((sum, payout) => {
-            if (payout.payout_status !== "Paid") {
-              return sum;
-            }
-
             const relatedCase = cases.find((record) => record.id === payout.sales_case_id) ?? null;
 
             if (!relatedCase || (selectedProjectId !== "all" && relatedCase.project_id !== selectedProjectId)) {
               return sum;
-            }
-
-            if (selectedMonth) {
-              const payoutCreatedAt = payout.created_at ? new Date(payout.created_at) : null;
-
-              if (getDateMonthValue(payoutCreatedAt) !== selectedMonth) {
-                return sum;
-              }
             }
 
             return sum + Number(payout.total_amount ?? 0);
@@ -1532,44 +1494,12 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
           return sum + grossAmount;
         }, 0);
 
-        const computedTotal = convertedFromRows + topUpConverted + convertedFromVouchers;
-        const payoutBackedTotal = Math.max(paidStandardConverted, completedCaseStandardConverted) + topUpConverted;
-
-        return Math.max(computedTotal, payoutBackedTotal);
+        return convertedFromRows + topUpConverted + convertedFromVouchers;
       };
 
-      const computedTeamTotal = teamMemberIds.reduce((sum, profileId) => sum + computeMemberConverted(profileId), 0);
-
-      const downlineFallbackTotal = downlineIds.reduce((sum, profileId) => {
-        const memberCaseIds = new Set(
-          cases
-            .filter((record) => {
-              const relatedIds = [record.created_by, ...(record.involved_user_ids ?? []), getStoredInvolvedProfileId(record)]
-                .filter(Boolean) as string[];
-
-              return relatedIds.includes(profileId) && matchesSelectedMonthAndProject(record);
-            })
-            .map((record) => record.id)
-        );
-
-        const standardRegardlessPayment = basePayouts
-          .filter(
-            (payout) =>
-              payout.payout_type === "standard" &&
-              payout.profile_id === profileId &&
-              memberCaseIds.has(payout.sales_case_id)
-          )
-          .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
-
-        return sum + standardRegardlessPayment;
-      }, 0);
-
-      const selfComputedTotal = userId ? computeMemberConverted(userId) : 0;
-      const hierarchyFallbackTotal = selfComputedTotal + downlineFallbackTotal;
-
-      return Math.max(computedTeamTotal, hierarchyFallbackTotal);
+      return teamMemberIdList.reduce((sum, profileId) => sum + computeMemberConverted(profileId), 0);
     },
-    [cases, downlineIds, paymentVoucherEntries, payouts, profiles, projectMap, selectedMonth, selectedProjectId, teamIdSet, userId]
+    [cases, paymentVoucherEntries, payouts, profiles, projectMap, selectedMonth, selectedProjectId, teamIdSet]
   );
 
   const totalTeamMonthlyGDV = useMemo(
