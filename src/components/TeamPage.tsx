@@ -1477,14 +1477,6 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
             return sum;
           }
 
-          const hasUnpaidLinkedPayout =
-            linkedPayoutIds.size === 0 ||
-            Array.from(linkedPayoutIds).some((payoutId) => payoutById.get(payoutId)?.payout_status !== "Paid");
-
-          if (!hasUnpaidLinkedPayout) {
-            return sum;
-          }
-
           const grossAmount = Number(meta.grossAmount ?? entry.amount ?? 0);
 
           if (!Number.isFinite(grossAmount)) {
