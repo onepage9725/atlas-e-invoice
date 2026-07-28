@@ -10,6 +10,7 @@ import {
 import { buildCommissionStructureByTotalPercentage } from "../lib/salesCasePayouts";
 import {
   getCaseCommissionAmountForProfiles,
+  getCaseHoldingCommissionAmountForProfile,
   getCasePersonalAmountForProfiles,
   getCompletedCommissionAmountForProfiles,
   getStoredInvolvedProfileId,
@@ -47,6 +48,7 @@ type VoucherHistoryMeta = {
   payoutIds?: string[];
   componentKeys?: string[];
   salesCaseIds?: string[];
+  profileIds?: string[];
   grossAmount?: number;
 };
 
@@ -666,27 +668,18 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
   );
 
   const totalMonthlySalesCommission = useMemo(
-    () => {
-      const filteredCaseIds = new Set(filteredCaseRows.map((record) => record.id));
-
-      const salesDirect = filteredCaseRows.reduce((sum, record) => {
+    () =>
+      filteredCaseRows.reduce((sum, record) => {
         const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+        const commissionStructure = getCaseCommissionStructure(record, project);
+        const totalCommissionPercentage =
+          (commissionStructure?.agent_commission ?? 0) +
+          (commissionStructure?.pre_leader_override ?? 0) +
+          (commissionStructure?.leader_override ?? 0);
 
-        return sum + getCaseCommissionAmountForProfiles(record, project, profiles, memberProfileIds);
-      }, 0);
-
-      const salesTopUp = payouts
-        .filter(
-          (payout) =>
-            payout.payout_type === "tier_upgrade_top_up" &&
-            filteredCaseIds.has(payout.sales_case_id) &&
-            memberProfileIds.has(payout.profile_id)
-        )
-        .reduce((sum, payout) => sum + Number(payout.total_amount ?? 0), 0);
-
-      return salesDirect + salesTopUp;
-    },
-    [filteredCaseRows, memberProfileIds, payouts, profiles, projectMap]
+        return sum + (record.nett_price ?? 0) * (totalCommissionPercentage / 100);
+      }, 0),
+    [filteredCaseRows, projectMap]
   );
 
   const totalMonthlyConvertedCommission = useMemo(
@@ -938,63 +931,294 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
   const teamMemberIds = useMemo(() => (userId ? new Set([userId, ...downlineIds]) : new Set<string>()), [downlineIds, userId]);
 
+  const teamOverviewCaseRows = useMemo(() => {
+    return cases.filter((record) => {
+      const createdAt = getLocalDateValueFromTimestamp(record.created_at);
+
+      if (defaultFromDate && createdAt < defaultFromDate) {
+        return false;
+      }
+
+      if (defaultToDate && createdAt > defaultToDate) {
+        return false;
+      }
+
+      const relatedIds = [record.created_by, getStoredInvolvedProfileId(record)].filter(Boolean) as string[];
+      return relatedIds.some((profileId) => teamMemberIds.has(profileId));
+    });
+  }, [cases, defaultFromDate, defaultToDate, teamMemberIds]);
+
   const totalTeamMonthlyGdvForMembers = useMemo(
     () => memberTeamCaseRows.reduce((sum, record) => sum + getCasePersonalAmountForProfiles(record, record.spa_price ?? 0, teamMemberIds), 0),
     [memberTeamCaseRows, teamMemberIds]
   );
 
-  const totalTeamMonthlyConvertedSales = useMemo(
-    () =>
-      memberTeamCaseRows.reduce((sum, record) => {
-        const relatedPayouts = (payoutMap.get(record.id) ?? []).filter((payout) => payout.payout_type !== "tier_upgrade_top_up");
-        const displayStatus =
-          relatedPayouts.length > 0 && relatedPayouts.every((payout) => payout.payout_status === "Paid")
-            ? "Completed"
-            : normalizeCaseStatus(record.status);
-
-        return displayStatus === "Completed"
-          ? sum + getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, teamMemberIds)
-          : sum;
-      }, 0),
-    [memberTeamCaseRows, payoutMap, teamMemberIds]
-  );
-
   const totalTeamMonthlySalesForMembers = useMemo(
-    () =>
-      memberTeamCaseRows.reduce((sum, record) => {
+    () => {
+      const directTotal = teamOverviewCaseRows.reduce((sum, record) => {
         const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
-        const commissionStructure = getCaseCommissionStructure(record, project);
-        const totalCommissionPercentage =
-          (commissionStructure?.agent_commission ?? 0) +
-          (commissionStructure?.pre_leader_override ?? 0) +
-          (commissionStructure?.leader_override ?? 0);
+        return sum + getCaseCommissionAmountForProfiles(record, project, profiles, teamMemberIds);
+      }, 0);
 
-        return sum + (record.nett_price ?? 0) * (totalCommissionPercentage / 100);
-      }, 0),
-    [memberTeamCaseRows, projectMap]
+      const unreleasedHoldingTotal = teamOverviewCaseRows.reduce((sum, record) => {
+        const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+        const relatedPayouts = payoutMap.get(record.id) ?? [];
+
+        const holdingForCase = Array.from(teamMemberIds).reduce((caseSum, profileId) => {
+          const hasReleasedHoldingTopUp = relatedPayouts.some(
+            (payout) => payout.profile_id === profileId && isReleasedHoldingTopUp(payout)
+          );
+
+          if (hasReleasedHoldingTopUp) {
+            return caseSum;
+          }
+
+          return caseSum + getCaseHoldingCommissionAmountForProfile(record, project, profiles, profileId);
+        }, 0);
+
+        return sum + holdingForCase;
+      }, 0);
+
+      const relatedCaseById = new Map(cases.map((record) => [record.id, record]));
+      const topUpTotal = payouts
+        .filter((payout) => payout.payout_type === "tier_upgrade_top_up" && teamMemberIds.has(payout.profile_id))
+        .reduce((sum, payout) => {
+          const relatedCase = relatedCaseById.get(payout.sales_case_id);
+
+          if (!relatedCase) {
+            return sum;
+          }
+
+          const payoutCreatedAt = getLocalDateValueFromTimestamp(payout.created_at);
+
+          if (
+            !payoutCreatedAt ||
+            (defaultFromDate && payoutCreatedAt < defaultFromDate) ||
+            (defaultToDate && payoutCreatedAt > defaultToDate)
+          ) {
+            return sum;
+          }
+
+          return sum + Number(payout.total_amount ?? 0);
+        }, 0);
+
+      return directTotal + unreleasedHoldingTotal + topUpTotal;
+    },
+    [cases, defaultFromDate, defaultToDate, payoutMap, payouts, profiles, projectMap, teamMemberIds, teamOverviewCaseRows]
   );
 
   const totalTeamMonthlyConvertedCommission = useMemo(
-    () =>
-      memberTeamCaseRows.reduce((sum, record) => {
-        const allRelatedPayouts = payoutMap.get(record.id) ?? [];
-        const relatedPayouts = allRelatedPayouts.filter(
-          (payout) => payout.payout_type !== "tier_upgrade_top_up" || isReleasedHoldingTopUp(payout)
+    () => {
+      const basePayouts = payouts.filter((payout) => !payout.id.includes(":"));
+      const basePayoutMap = new Map<string, SalesCasePayoutRecord[]>();
+
+      basePayouts.forEach((payout) => {
+        const related = basePayoutMap.get(payout.sales_case_id) ?? [];
+        related.push(payout);
+        basePayoutMap.set(payout.sales_case_id, related);
+      });
+
+      const payoutById = new Map(basePayouts.map((payout) => [payout.id, payout]));
+      const teamMemberIdList = Array.from(teamMemberIds);
+
+      const isWithinCurrentMonth = (value: string | null) => {
+        const dateValue = getLocalDateValueFromTimestamp(value);
+        return Boolean(dateValue && dateValue >= defaultFromDate && dateValue <= defaultToDate);
+      };
+
+      const computeMemberConverted = (profileId: string) => {
+        const memberCaseRows = cases.filter((record) => {
+          const relatedIds = [record.created_by, ...(record.involved_user_ids ?? []), getStoredInvolvedProfileId(record)].filter(Boolean) as string[];
+          return relatedIds.includes(profileId) && isWithinCurrentMonth(record.created_at);
+        });
+
+        const memberCaseIds = new Set(memberCaseRows.map((record) => record.id));
+        const memberPayoutIds = new Set(
+          basePayouts
+            .filter((payout) => payout.profile_id === profileId)
+            .map((payout) => payout.id)
         );
 
-        const completedDirectAndReleased = getCompletedCommissionAmountForProfiles(relatedPayouts, teamMemberIds);
-        const completedTopUp = allRelatedPayouts
+        const convertedFromRows = memberCaseRows.reduce((sum, record) => {
+          const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+          const allRelatedPayouts = basePayoutMap.get(record.id) ?? [];
+          const standardRelatedPayouts = allRelatedPayouts.filter(
+            (payout) => payout.payout_type !== "tier_upgrade_top_up"
+          );
+          const viewerPayout = standardRelatedPayouts.find((payout) => payout.profile_id === profileId) ?? null;
+          const baseStatus = normalizeCaseStatus(record.status);
+          const displayStatus = viewerPayout?.payout_status === "Paid" ? "Completed" : baseStatus;
+
+          if (displayStatus !== "Completed") {
+            return sum;
+          }
+
+          const computedDirectAmount = getCaseCommissionAmountForProfiles(record, project, profiles, [profileId]);
+          const standardPayoutAmountFallback = standardRelatedPayouts
+            .filter((payout) => payout.profile_id === profileId)
+            .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
+          const directAmount =
+            computedDirectAmount > 0
+              ? computedDirectAmount
+              : standardPayoutAmountFallback > 0
+                ? standardPayoutAmountFallback
+                : Number(viewerPayout?.total_amount ?? 0);
+          const hasReleasedHoldingTopUp = allRelatedPayouts.some(
+            (payout) => payout.profile_id === profileId && isReleasedHoldingTopUp(payout)
+          );
+          const holdingAmount = hasReleasedHoldingTopUp
+            ? 0
+            : getCaseHoldingCommissionAmountForProfile(record, project, profiles, profileId);
+
+          return sum + directAmount + holdingAmount;
+        }, 0);
+
+        const paidStandardConverted = memberCaseRows.reduce((sum, record) => {
+          const relatedPayouts = basePayoutMap.get(record.id) ?? [];
+          const paidStandardForMember = relatedPayouts
+            .filter(
+              (payout) =>
+                payout.payout_type === "standard" &&
+                payout.profile_id === profileId &&
+                payout.payout_status === "Paid"
+            )
+            .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
+
+          return sum + paidStandardForMember;
+        }, 0);
+
+        const completedCaseStandardConverted = memberCaseRows.reduce((sum, record) => {
+          if (normalizeCaseStatus(record.status) !== "Completed") {
+            return sum;
+          }
+
+          const relatedPayouts = basePayoutMap.get(record.id) ?? [];
+          const standardForMember = relatedPayouts
+            .filter(
+              (payout) =>
+                payout.payout_type === "standard" &&
+                payout.profile_id === profileId
+            )
+            .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
+
+          return sum + standardForMember;
+        }, 0);
+
+        const topUpConverted = basePayouts
+          .filter((payout) => payout.payout_type === "tier_upgrade_top_up" && payout.profile_id === profileId)
+          .reduce((sum, payout) => {
+            if (!isWithinCurrentMonth(payout.created_at) || payout.payout_status !== "Paid") {
+              return sum;
+            }
+
+            return sum + Number(payout.total_amount ?? 0);
+          }, 0);
+
+        const convertedFromVouchers = entries.reduce((sum, entry) => {
+          if (entry.description !== "Payment voucher generated") {
+            return sum;
+          }
+
+          const meta = parseVoucherHistoryMeta(entry.reference_detail);
+
+          if (!meta) {
+            return sum;
+          }
+
+          const hasProfileMatch = (meta.profileIds ?? []).includes(profileId);
+          const relatedCaseIds = new Set<string>((meta.salesCaseIds ?? []).filter(Boolean));
+          const linkedPayoutIds = new Set<string>((meta.payoutIds ?? []).filter(Boolean));
+
+          (meta.componentKeys ?? []).forEach((componentKey) => {
+            const payoutId = getPayoutIdFromComponentKey(componentKey);
+
+            if (!payoutId) {
+              return;
+            }
+
+            linkedPayoutIds.add(payoutId);
+            const payout = payoutById.get(payoutId);
+
+            if (payout?.sales_case_id) {
+              relatedCaseIds.add(payout.sales_case_id);
+            }
+          });
+
+          linkedPayoutIds.forEach((payoutId) => {
+            const payout = payoutById.get(payoutId);
+
+            if (payout?.sales_case_id) {
+              relatedCaseIds.add(payout.sales_case_id);
+            }
+          });
+
+          const hasPayoutMatch = Array.from(linkedPayoutIds).some((payoutId) => memberPayoutIds.has(payoutId));
+
+          if (!hasProfileMatch && !hasPayoutMatch) {
+            return sum;
+          }
+
+          const hasScopedCase = Array.from(relatedCaseIds).some((caseId) => memberCaseIds.has(caseId));
+
+          if (!hasScopedCase) {
+            return sum;
+          }
+
+          const hasUnpaidLinkedPayout =
+            linkedPayoutIds.size === 0 ||
+            Array.from(linkedPayoutIds).some((payoutId) => payoutById.get(payoutId)?.payout_status !== "Paid");
+
+          if (!hasUnpaidLinkedPayout) {
+            return sum;
+          }
+
+          const grossAmount = Number(meta.grossAmount ?? entry.amount ?? 0);
+
+          if (!Number.isFinite(grossAmount)) {
+            return sum;
+          }
+
+          return sum + grossAmount;
+        }, 0);
+
+        const computedTotal = convertedFromRows + topUpConverted + convertedFromVouchers;
+        const payoutBackedTotal = Math.max(paidStandardConverted, completedCaseStandardConverted) + topUpConverted;
+
+        return Math.max(computedTotal, payoutBackedTotal);
+      };
+
+      const computedTeamTotal = teamMemberIdList.reduce((sum, profileId) => sum + computeMemberConverted(profileId), 0);
+
+      const downlineFallbackTotal = downlineIds.reduce((sum, profileId) => {
+        const memberCaseIds = new Set(
+          cases
+            .filter((record) => {
+              const relatedIds = [record.created_by, ...(record.involved_user_ids ?? []), getStoredInvolvedProfileId(record)]
+                .filter(Boolean) as string[];
+
+              return relatedIds.includes(profileId) && isWithinCurrentMonth(record.created_at);
+            })
+            .map((record) => record.id)
+        );
+
+        const standardRegardlessPayment = basePayouts
           .filter(
             (payout) =>
-              payout.payout_type === "tier_upgrade_top_up" &&
-              payout.payout_status === "Paid" &&
-              teamMemberIds.has(payout.profile_id)
+              payout.payout_type === "standard" &&
+              payout.profile_id === profileId &&
+              memberCaseIds.has(payout.sales_case_id)
           )
-          .reduce((topUpSum, payout) => topUpSum + Number(payout.total_amount ?? 0), 0);
+          .reduce((innerSum, payout) => innerSum + Number(payout.total_amount ?? 0), 0);
 
-        return sum + completedDirectAndReleased + completedTopUp;
-      }, 0),
-    [memberTeamCaseRows, payoutMap, teamMemberIds]
+        return sum + standardRegardlessPayment;
+      }, 0);
+
+      const selfComputedTotal = userId ? computeMemberConverted(userId) : 0;
+      const hierarchyFallbackTotal = selfComputedTotal + downlineFallbackTotal;
+
+      return Math.max(computedTeamTotal, hierarchyFallbackTotal);
+    },
+    [cases, defaultFromDate, defaultToDate, downlineIds, entries, payouts, profiles, projectMap, teamMemberIds, userId]
   );
 
   const totalPaidOutToAgent = useMemo(
@@ -1086,6 +1310,31 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
         if (
           entry.entry_type !== "cash_in" ||
+          !transactedAt ||
+          transactedAt < defaultFromDate ||
+          transactedAt > defaultToDate
+        ) {
+          return sum;
+        }
+
+        return sum + Number(entry.amount ?? 0);
+      }, 0),
+    [defaultFromDate, defaultToDate, entries]
+  );
+
+  const totalCashForCampaign = useMemo(
+    () =>
+      entries.reduce((sum, entry) => {
+        const transactedAt = getLocalDateValueFromTimestamp(entry.transacted_at);
+        const normalizedDescription = (entry.description ?? "").toLowerCase();
+        const normalizedReferenceDetail = (entry.reference_detail ?? "").toLowerCase();
+        const isCampaignEntry =
+          normalizedDescription.includes("campaign") ||
+          normalizedReferenceDetail.includes("campaign");
+
+        if (
+          entry.entry_type !== "cash_out" ||
+          !isCampaignEntry ||
           !transactedAt ||
           transactedAt < defaultFromDate ||
           transactedAt > defaultToDate
@@ -1239,6 +1488,11 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
             <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalCashOut)}</p>
             <p className="text-xs text-gray-500 mt-2">All outgoing payments within the current month.</p>
           </div>
+          <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+            <p className="text-sm font-medium text-gray-500 mb-2">Cash for Campaign</p>
+            <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalCashForCampaign)}</p>
+            <p className="text-xs text-gray-500 mt-2">Outgoing campaign-related cash within the current month.</p>
+          </div>
         </div>
       ) : isAdmin ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
@@ -1300,14 +1554,10 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
             <h3 className="text-lg font-semibold text-gray-900">Team This Month</h3>
             <p className="mt-1 text-sm text-gray-500">Monthly team performance using the same calculation as the Team page.</p>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
               <p className="text-sm font-medium text-gray-500 mb-2">Team GDV of the Month</p>
               <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyGdvForMembers)}</p>
-            </div>
-            <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-              <p className="text-sm font-medium text-gray-500 mb-2">Team Converted of the Month</p>
-              <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyConvertedSales)}</p>
             </div>
             <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
               <p className="text-sm font-medium text-gray-500 mb-2">Team Total Sales of the Month</p>
@@ -1343,38 +1593,39 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       )}
       {selectedEvent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white w-full max-w-5xl rounded-xl shadow-lg border border-gray-100 overflow-hidden">
-            <div className="w-full aspect-[1600/380] bg-gray-50">
+          <div className="relative w-full max-w-5xl">
+            <button
+              type="button"
+              onClick={() => setSelectedEvent(null)}
+              className="absolute -right-2 -top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:bg-gray-50 hover:text-gray-900"
+              aria-label="Close event popup"
+            >
+              x
+            </button>
+            <div className="bg-white w-full rounded-xl shadow-lg border border-gray-100 overflow-hidden max-h-[90vh]">
+              <div className="w-full bg-gray-50">
               {selectedEvent.image_url ? (
                 <img
                   src={selectedEvent.image_url}
                   alt={selectedEvent.event_name}
-                  className="h-full w-full object-cover"
+                  className="w-full h-auto object-contain"
                 />
               ) : (
-                <div className="h-full w-full flex items-center justify-center text-sm text-gray-400">
+                <div className="h-56 w-full flex items-center justify-center text-sm text-gray-400">
                   No image available
                 </div>
               )}
-            </div>
-            <div className="p-5 space-y-2">
-              <h4 className="text-lg font-semibold text-gray-900">
-                {selectedEvent.event_name}
-              </h4>
-              <p className="text-sm text-gray-500">
-                Event Date: {(selectedEvent.start_date || "-") + " - " + (selectedEvent.end_date || "-")}
-              </p>
-              {selectedEvent.description && (
-                <p className="text-sm text-gray-600 whitespace-pre-wrap">{selectedEvent.description}</p>
-              )}
-              <div className="flex justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedEvent(null)}
-                  className="text-sm text-gray-600 hover:text-gray-900"
-                >
-                  Close
-                </button>
+              </div>
+              <div className="p-5 space-y-2 overflow-y-auto max-h-[35vh]">
+                <h4 className="text-lg font-semibold text-gray-900">
+                  {selectedEvent.event_name}
+                </h4>
+                <p className="text-sm text-gray-500">
+                  Event Date: {(selectedEvent.start_date || "-") + " - " + (selectedEvent.end_date || "-")}
+                </p>
+                {selectedEvent.description && (
+                  <p className="text-sm text-gray-600 whitespace-pre-wrap">{selectedEvent.description}</p>
+                )}
               </div>
             </div>
           </div>
