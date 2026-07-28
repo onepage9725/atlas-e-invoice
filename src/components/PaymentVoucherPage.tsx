@@ -57,6 +57,13 @@ type VoucherHistoryEntry = {
   created_at: string;
 };
 
+type ComponentPaymentMeta = {
+  componentKey: string;
+  payoutId: string;
+  amount: number;
+  remark: string;
+};
+
 type VoucherHistoryMeta = {
   payoutIds?: string[];
   componentKeys?: string[];
@@ -70,6 +77,7 @@ type VoucherHistoryMeta = {
   icNo?: string;
   refNo?: string;
   chequersNo?: string;
+  componentPayments?: ComponentPaymentMeta[];
 };
 
 type VoucherHistoryDisplayRow = {
@@ -87,7 +95,11 @@ type SelectedVoucherComponentRow = {
   componentKey: string;
   row: VoucherBreakdownRow;
   component: VoucherComponentBreakdown;
+  paidAmount: number;
+  remainingAmount: number;
 };
+
+const PAYMENT_EPSILON = 0.009;
 
 const HISTORY_META_SEPARATOR = "|||META|||";
 
@@ -458,6 +470,8 @@ export function PaymentVoucherPage({
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [expandedCaseIds, setExpandedCaseIds] = useState<string[]>([]);
   const [selectedComponentKeys, setSelectedComponentKeys] = useState<string[]>([]);
+  const [batchAmountsByComponentKey, setBatchAmountsByComponentKey] = useState<Record<string, string>>({});
+  const [batchRemarksByComponentKey, setBatchRemarksByComponentKey] = useState<Record<string, string>>({});
   const [voucherHistory, setVoucherHistory] = useState<VoucherHistoryEntry[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDeletingHistoryId, setIsDeletingHistoryId] = useState<string | null>(null);
@@ -691,11 +705,40 @@ export function PaymentVoucherPage({
     return map;
   }, [projects]);
 
-  const paidComponentKeys = useMemo(() => {
+  const paidAmountsByComponentKey = useMemo(() => {
+    const map = new Map<string, number>();
+
+    voucherHistory.forEach((history) => {
+      const meta = parseVoucherHistoryMeta(history.reference_detail);
+
+      (meta?.componentPayments ?? []).forEach((payment) => {
+        if (!payment?.componentKey) {
+          return;
+        }
+
+        const nextAmount = Number(payment.amount ?? 0);
+        if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
+          return;
+        }
+
+        map.set(payment.componentKey, Number(((map.get(payment.componentKey) ?? 0) + nextAmount).toFixed(2)));
+      });
+    });
+
+    return map;
+  }, [voucherHistory]);
+
+  const legacyFullyPaidComponentKeys = useMemo(() => {
     const keys = new Set<string>();
 
     voucherHistory.forEach((history) => {
       const meta = parseVoucherHistoryMeta(history.reference_detail);
+      const hasBatchPayments = Boolean(meta?.componentPayments && meta.componentPayments.length > 0);
+
+      if (hasBatchPayments) {
+        return;
+      }
+
       (meta?.componentKeys ?? []).forEach((key) => {
         if (key) {
           keys.add(key);
@@ -755,7 +798,17 @@ export function PaymentVoucherPage({
       .map((group) => ({
         ...group,
         rows: [...group.rows]
-          .filter((row) => getVoucherComponentBreakdown(row).some((component) => !paidComponentKeys.has(component.key)))
+          .filter((row) =>
+            getVoucherComponentBreakdown(row).some((component) => {
+              if (legacyFullyPaidComponentKeys.has(component.key)) {
+                return false;
+              }
+
+              const paidAmount = paidAmountsByComponentKey.get(component.key) ?? 0;
+              const remainingAmount = Number((component.amount - paidAmount).toFixed(2));
+              return remainingAmount > PAYMENT_EPSILON;
+            })
+          )
           .sort((left, right) => {
           if (left.isHoldingComm !== right.isHoldingComm) {
             return left.isHoldingComm ? 1 : -1;
@@ -769,6 +822,24 @@ export function PaymentVoucherPage({
             return left.id.localeCompare(right.id);
           }),
       }))
+      .map((group) => {
+        const remainingTotal = group.rows.reduce((sum, row) => {
+          const rowRemaining = getVoucherComponentBreakdown(row)
+            .filter((component) => !legacyFullyPaidComponentKeys.has(component.key))
+            .reduce((componentSum, component) => {
+              const paidAmount = paidAmountsByComponentKey.get(component.key) ?? 0;
+              const remainingAmount = Number((component.amount - paidAmount).toFixed(2));
+              return componentSum + (remainingAmount > PAYMENT_EPSILON ? remainingAmount : 0);
+            }, 0);
+
+          return sum + rowRemaining;
+        }, 0);
+
+        return {
+          ...group,
+          totalAmount: Number(remainingTotal.toFixed(2)),
+        };
+      })
       .filter((group) => group.rows.length > 0)
       .sort((left, right) => {
         const leftProject = left.projectName.toLowerCase();
@@ -780,7 +851,7 @@ export function PaymentVoucherPage({
 
         return left.unitLabel.localeCompare(right.unitLabel);
       });
-  }, [caseMap, paidComponentKeys, payouts, profileMap, projectMap]);
+  }, [caseMap, legacyFullyPaidComponentKeys, paidAmountsByComponentKey, payouts, profileMap, projectMap]);
 
   useEffect(() => {
     setExpandedCaseIds((prev) => prev.filter((id) => groupedCases.some((group) => group.salesCaseId === id)));
@@ -789,7 +860,15 @@ export function PaymentVoucherPage({
         groupedCases.flatMap((group) =>
           group.rows.flatMap((row) =>
             getVoucherComponentBreakdown(row)
-              .filter((component) => !paidComponentKeys.has(component.key))
+              .filter((component) => {
+                if (legacyFullyPaidComponentKeys.has(component.key)) {
+                  return false;
+                }
+
+                const paidAmount = paidAmountsByComponentKey.get(component.key) ?? 0;
+                const remainingAmount = Number((component.amount - paidAmount).toFixed(2));
+                return remainingAmount > PAYMENT_EPSILON;
+              })
               .map((component) => component.key)
           )
         )
@@ -797,37 +876,101 @@ export function PaymentVoucherPage({
 
       return prev.filter((key) => validComponentKeys.has(key));
     });
-  }, [groupedCases, paidComponentKeys]);
+  }, [groupedCases, legacyFullyPaidComponentKeys, paidAmountsByComponentKey]);
 
   const allCaseComponents = useMemo<SelectedVoucherComponentRow[]>(() => {
     return groupedCases.flatMap((group) =>
       group.rows.flatMap((row) =>
         getVoucherComponentBreakdown(row)
-          .filter((component) => !paidComponentKeys.has(component.key))
-          .map((component) => ({
-            componentKey: component.key,
-            row,
-            component,
-          }))
+          .map((component) => {
+            if (legacyFullyPaidComponentKeys.has(component.key)) {
+              return null;
+            }
+
+            const paidAmount = Number((paidAmountsByComponentKey.get(component.key) ?? 0).toFixed(2));
+            const remainingAmount = Number((component.amount - paidAmount).toFixed(2));
+
+            if (remainingAmount <= PAYMENT_EPSILON) {
+              return null;
+            }
+
+            return {
+              componentKey: component.key,
+              row,
+              component,
+              paidAmount,
+              remainingAmount,
+            };
+          })
+          .filter((item): item is SelectedVoucherComponentRow => Boolean(item))
       )
     );
-  }, [groupedCases, paidComponentKeys]);
+  }, [groupedCases, legacyFullyPaidComponentKeys, paidAmountsByComponentKey]);
 
   const selectedComponentRows = useMemo(
     () => allCaseComponents.filter((item) => selectedComponentKeys.includes(item.componentKey)),
     [allCaseComponents, selectedComponentKeys]
   );
 
+  useEffect(() => {
+    setBatchAmountsByComponentKey((prev) => {
+      const next = { ...prev };
+      const selectedKeys = new Set(selectedComponentRows.map((item) => item.componentKey));
+
+      Object.keys(next).forEach((key) => {
+        if (!selectedKeys.has(key)) {
+          delete next[key];
+        }
+      });
+
+      selectedComponentRows.forEach((item) => {
+        const existingValue = Number(next[item.componentKey]);
+        if (!Number.isFinite(existingValue) || existingValue <= 0 || existingValue > item.remainingAmount + PAYMENT_EPSILON) {
+          next[item.componentKey] = item.remainingAmount.toFixed(2);
+        }
+      });
+
+      return next;
+    });
+
+    setBatchRemarksByComponentKey((prev) => {
+      const next = { ...prev };
+      const selectedKeys = new Set(selectedComponentRows.map((item) => item.componentKey));
+
+      Object.keys(next).forEach((key) => {
+        if (!selectedKeys.has(key)) {
+          delete next[key];
+        }
+      });
+
+      selectedComponentRows.forEach((item) => {
+        if (next[item.componentKey] === undefined) {
+          next[item.componentKey] = "";
+        }
+      });
+
+      return next;
+    });
+  }, [selectedComponentRows]);
+
   const selectedRows = useMemo(
     () =>
-      selectedComponentRows.map(({ componentKey, row, component }) => ({
+      selectedComponentRows.map(({ componentKey, row, component, remainingAmount }) => {
+        const typedAmount = Number(batchAmountsByComponentKey[componentKey]);
+        const normalizedAmount =
+          Number.isFinite(typedAmount) && typedAmount > 0
+            ? Math.min(typedAmount, remainingAmount)
+            : remainingAmount;
+
+        return {
         ...row,
         id: componentKey,
         commissionPercentage: component.percentage,
-        amount: component.amount,
+        amount: Number(normalizedAmount.toFixed(2)),
         componentCategory: component.componentCategory,
-      })),
-    [selectedComponentRows]
+      };
+      }),
+    [batchAmountsByComponentKey, selectedComponentRows]
   );
 
   const toggleExpand = (salesCaseId: string) => {
@@ -843,7 +986,14 @@ export function PaymentVoucherPage({
       .find((group) => group.salesCaseId === salesCaseId)
       ?.rows.flatMap((row) =>
         getVoucherComponentBreakdown(row)
-          .filter((component) => !paidComponentKeys.has(component.key))
+          .filter((component) => {
+            if (legacyFullyPaidComponentKeys.has(component.key)) {
+              return false;
+            }
+
+            const paidAmount = paidAmountsByComponentKey.get(component.key) ?? 0;
+            return Number((component.amount - paidAmount).toFixed(2)) > PAYMENT_EPSILON;
+          })
           .map((component) => ({ componentKey: component.key, row }))
       ) ?? [];
     const selectedProfileId = selectedComponentRows[0]?.row.profileId ?? null;
@@ -1241,6 +1391,50 @@ export function PaymentVoucherPage({
       return;
     }
 
+    const selectedComponentPayments = selectedComponentRows.map((item) => {
+      const typedAmount = Number(batchAmountsByComponentKey[item.componentKey]);
+      const amount = Number.isFinite(typedAmount) ? Number(typedAmount.toFixed(2)) : NaN;
+      const remark = (batchRemarksByComponentKey[item.componentKey] ?? "").trim();
+
+      return {
+        componentKey: item.componentKey,
+        payoutId: item.row.id,
+        amount,
+        remark,
+        remainingAmount: item.remainingAmount,
+      };
+    });
+
+    const invalidAmountPayment = selectedComponentPayments.find(
+      (item) => !Number.isFinite(item.amount) || item.amount <= 0 || item.amount > item.remainingAmount + PAYMENT_EPSILON
+    );
+
+    if (invalidAmountPayment) {
+      setError("Each selected batch amount must be more than 0 and cannot exceed the remaining commission amount.");
+      setSuccess(null);
+      return;
+    }
+
+    const missingRemarkPayment = selectedComponentPayments.find((item) => !item.remark);
+
+    if (missingRemarkPayment) {
+      setError("Please enter a payment remark for each selected batch before generating the voucher.");
+      setSuccess(null);
+      return;
+    }
+
+    const payableRows = selectedComponentRows.map(({ componentKey, row, component }) => {
+      const matchedPayment = selectedComponentPayments.find((item) => item.componentKey === componentKey);
+
+      return {
+        ...row,
+        id: componentKey,
+        commissionPercentage: component.percentage,
+        amount: matchedPayment ? matchedPayment.amount : component.amount,
+        componentCategory: component.componentCategory,
+      };
+    });
+
     const normalizedIcNo = voucherIcNo.trim();
     const normalizedRefNo = voucherRefNo.trim();
     const normalizedChequersNo = voucherChequersNo.trim();
@@ -1260,12 +1454,12 @@ export function PaymentVoucherPage({
         deductWithholdingTax,
       };
 
-      const voucherBlob = await buildVoucherPdf(selectedRows, selectedDeductions, {
+      const voucherBlob = await buildVoucherPdf(payableRows, selectedDeductions, {
         icNo: normalizedIcNo,
         refNo: normalizedRefNo,
         chequersNo: normalizedChequersNo,
       });
-      const voucherPath = buildUniqueVoucherPath(userId, selectedRows);
+      const voucherPath = buildUniqueVoucherPath(userId, payableRows);
 
       const { error: uploadError } = await supabase.storage
         .from("cases")
@@ -1284,28 +1478,32 @@ export function PaymentVoucherPage({
       const voucherUrl = publicUrlData.publicUrl;
 
       const selectedDetails = Array.from(
-        new Set(selectedRows.map((row) => `${row.projectName} Unit ${row.unitLabel}`))
+        new Set(payableRows.map((row) => `${row.projectName} Unit ${row.unitLabel}`))
       ).join("; ");
-      const selectedMemberLabels = Array.from(new Set(selectedRows.map((row) => row.memberLabel)));
-      const selectedComponentKeyList = Array.from(new Set(selectedRows.map((row) => row.id).filter(Boolean)));
+      const selectedMemberLabels = Array.from(new Set(payableRows.map((row) => row.memberLabel)));
+      const selectedComponentKeyList = Array.from(new Set(payableRows.map((row) => row.id).filter(Boolean)));
       const selectedPayoutIds = Array.from(new Set(selectedComponentRows.map(({ row }) => row.id).filter(Boolean)));
-      const selectedSalesCaseIds = Array.from(new Set(selectedRows.map((row) => row.salesCaseId).filter(Boolean)));
-      const selectedProfileIds = Array.from(new Set(selectedRows.map((row) => row.profileId).filter(Boolean)));
+      const selectedSalesCaseIds = Array.from(new Set(payableRows.map((row) => row.salesCaseId).filter(Boolean)));
+      const selectedProfileIds = Array.from(new Set(payableRows.map((row) => row.profileId).filter(Boolean)));
       const selectedCommissionLabels = Array.from(
-        new Set(selectedRows.map((row) => formatPercentage(row.commissionPercentage)).filter((label) => label !== "-"))
+        new Set(payableRows.map((row) => formatPercentage(row.commissionPercentage)).filter((label) => label !== "-"))
       );
       const selectedBookingFormUrls = Array.from(
         new Set(
-          selectedRows
+          payableRows
             .map((row) => caseMap.get(row.salesCaseId)?.booking_form_url ?? null)
             .filter((url): url is string => Boolean(url))
         )
       );
 
+      const batchRemarkSummary = selectedComponentPayments
+        .map((item) => `${item.remark} (RM ${formatAmount(item.amount)})`)
+        .join("; ");
+
       const historyMetaPayload = JSON.stringify({
         payoutIds: selectedPayoutIds,
         componentKeys: selectedComponentKeyList,
-        grossAmount: Number(selectedRows.reduce((sum, row) => sum + row.amount, 0).toFixed(2)),
+        grossAmount: Number(payableRows.reduce((sum, row) => sum + row.amount, 0).toFixed(2)),
         salesCaseIds: selectedSalesCaseIds,
         storagePath: voucherPath,
         profileIds: selectedProfileIds,
@@ -1315,11 +1513,17 @@ export function PaymentVoucherPage({
         icNo: normalizedIcNo,
         refNo: normalizedRefNo,
         chequersNo: normalizedChequersNo,
+        componentPayments: selectedComponentPayments.map((item) => ({
+          componentKey: item.componentKey,
+          payoutId: item.payoutId,
+          amount: item.amount,
+          remark: item.remark,
+        })),
       } as VoucherHistoryMeta);
-      const storedReferenceDetail = `${selectedDetails}${HISTORY_META_SEPARATOR}${historyMetaPayload}`;
+      const storedReferenceDetail = `${selectedDetails} | Batch Remark: ${batchRemarkSummary}${HISTORY_META_SEPARATOR}${historyMetaPayload}`;
 
       const calculatedAmounts = calculateVoucherAmounts(
-        selectedRows.reduce((sum, row) => sum + row.amount, 0),
+        payableRows.reduce((sum, row) => sum + row.amount, 0),
         selectedDeductions
       );
       const totalAmount = calculatedAmounts.finalPayoutAmount;
@@ -1372,20 +1576,34 @@ export function PaymentVoucherPage({
         }
       }
 
-      const payoutIdsToMarkPaid = Array.from(selectedByPayoutId.entries())
-        .filter(([payoutId, selectedCount]) => {
+      const generatedAmountByComponent = new Map<string, number>();
+      selectedComponentPayments.forEach((item) => {
+        generatedAmountByComponent.set(item.componentKey, item.amount);
+      });
+
+      const payoutIdsToMarkPaid = Array.from(selectedByPayoutId.keys())
+        .filter((payoutId) => {
           const sourceRow = groupedCases.flatMap((group) => group.rows).find((row) => row.id === payoutId);
 
           if (!sourceRow) {
             return false;
           }
 
-          const remainingComponentCount = getVoucherComponentBreakdown(sourceRow)
-            .filter((component) => !paidComponentKeys.has(component.key)).length;
+          const hasRemainingAfterPayment = getVoucherComponentBreakdown(sourceRow).some((component) => {
+            if (legacyFullyPaidComponentKeys.has(component.key)) {
+              return false;
+            }
 
-          return remainingComponentCount > 0 && selectedCount >= remainingComponentCount;
+            const paidBefore = paidAmountsByComponentKey.get(component.key) ?? 0;
+            const paidNow = generatedAmountByComponent.get(component.key) ?? 0;
+            const remaining = Number((component.amount - paidBefore - paidNow).toFixed(2));
+
+            return remaining > PAYMENT_EPSILON;
+          });
+
+          return !hasRemainingAfterPayment;
         })
-        .map(([payoutId]) => payoutId);
+        .map((payoutId) => payoutId);
 
       let markPaidError: { message: string } | null = null;
 
@@ -1417,7 +1635,7 @@ export function PaymentVoucherPage({
           recipientIds: selectedProfileIds,
           salesCaseId: selectedSalesCaseIds[0] ?? null,
           details: selectedDetails,
-          grossAmount: Number(selectedRows.reduce((sum, row) => sum + row.amount, 0).toFixed(2)),
+          grossAmount: Number(payableRows.reduce((sum, row) => sum + row.amount, 0).toFixed(2)),
         });
       } catch (notificationError) {
         console.error("Failed to create notifications for generated payment voucher", notificationError);
@@ -1425,6 +1643,8 @@ export function PaymentVoucherPage({
 
       await fetchData();
       setSelectedComponentKeys([]);
+      setBatchAmountsByComponentKey({});
+      setBatchRemarksByComponentKey({});
       setIsGenerating(false);
       setShowGenerateOptions(false);
       setSuccess("Payment voucher PDF generated and saved to history.");
@@ -1685,7 +1905,14 @@ export function PaymentVoucherPage({
                   : group.rows;
                 const selectableComponentKeys = selectableRows.flatMap((row) =>
                   getVoucherComponentBreakdown(row)
-                    .filter((component) => !paidComponentKeys.has(component.key))
+                    .filter((component) => {
+                      if (legacyFullyPaidComponentKeys.has(component.key)) {
+                        return false;
+                      }
+
+                      const paidAmount = paidAmountsByComponentKey.get(component.key) ?? 0;
+                      return Number((component.amount - paidAmount).toFixed(2)) > PAYMENT_EPSILON;
+                    })
                     .map((component) => component.key)
                 );
                 const isSelected =
@@ -1752,15 +1979,37 @@ export function PaymentVoucherPage({
                                   <th className="px-2 py-2">Type</th>
                                   <th className="px-2 py-2">Commission %</th>
                                   <th className="px-2 py-2">Amount (RM)</th>
+                                  <th className="px-2 py-2">Batch Amount (RM)</th>
+                                  <th className="px-2 py-2">Payment Remark</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {group.rows.map((row) => {
-                                  const componentRows = getVoucherComponentBreakdown(row).filter(
-                                    (component) => !paidComponentKeys.has(component.key)
-                                  );
+                                  const componentRows = getVoucherComponentBreakdown(row)
+                                    .map((component) => {
+                                      if (legacyFullyPaidComponentKeys.has(component.key)) {
+                                        return null;
+                                      }
 
-                                  return componentRows.map((component) => (
+                                      const paidAmount = Number((paidAmountsByComponentKey.get(component.key) ?? 0).toFixed(2));
+                                      const remainingAmount = Number((component.amount - paidAmount).toFixed(2));
+
+                                      if (remainingAmount <= PAYMENT_EPSILON) {
+                                        return null;
+                                      }
+
+                                      return {
+                                        component,
+                                        paidAmount,
+                                        remainingAmount,
+                                      };
+                                    })
+                                    .filter(
+                                      (item): item is { component: VoucherComponentBreakdown; paidAmount: number; remainingAmount: number } =>
+                                        Boolean(item)
+                                    );
+
+                                  return componentRows.map(({ component, remainingAmount }) => (
                                     <tr
                                       key={component.key}
                                       className={`border-b border-gray-100 ${component.typeLabel.includes("Holding Comm") ? "bg-yellow-50" : ""}`}
@@ -1776,7 +2025,42 @@ export function PaymentVoucherPage({
                                       <td className="px-2 py-2 text-gray-700">{row.memberLabel}</td>
                                       <td className="px-2 py-2 text-gray-700">{component.typeLabel}</td>
                                       <td className="px-2 py-2 text-gray-700">{formatPercentage(component.percentage)}</td>
-                                      <td className="px-2 py-2 text-gray-700">{formatAmount(component.amount)}</td>
+                                      <td className="px-2 py-2 text-gray-700">
+                                        <div>RM {formatAmount(component.amount)}</div>
+                                        <div className="text-xs text-gray-500">Remaining: RM {formatAmount(remainingAmount)}</div>
+                                      </td>
+                                      <td className="px-2 py-2 text-gray-700">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={batchAmountsByComponentKey[component.key] ?? ""}
+                                          onChange={(event) => {
+                                            setBatchAmountsByComponentKey((prev) => ({
+                                              ...prev,
+                                              [component.key]: event.target.value,
+                                            }));
+                                          }}
+                                          disabled={!selectedComponentKeys.includes(component.key)}
+                                          placeholder="0.00"
+                                          className="w-32 rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:bg-gray-100"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2 text-gray-700">
+                                        <input
+                                          type="text"
+                                          value={batchRemarksByComponentKey[component.key] ?? ""}
+                                          onChange={(event) => {
+                                            setBatchRemarksByComponentKey((prev) => ({
+                                              ...prev,
+                                              [component.key]: event.target.value,
+                                            }));
+                                          }}
+                                          disabled={!selectedComponentKeys.includes(component.key)}
+                                          placeholder="e.g. 1st batch July"
+                                          className="w-48 rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:bg-gray-100"
+                                        />
+                                      </td>
                                     </tr>
                                   ));
                                 })}

@@ -308,6 +308,7 @@ export function FinancePage({ userId, role }: FinancePageProps) {
   const replacementReceiptInputRef = useRef<HTMLInputElement | null>(null);
 
   const canManageEntries = role === "admin" || role === "super_admin";
+  const isSuperAdmin = role === "super_admin";
   const caseWorkflowEnabled = useMemo(
     () => cases.some((record) => hasCaseWorkflowColumns(record)),
     [cases]
@@ -856,6 +857,33 @@ export function FinancePage({ userId, role }: FinancePageProps) {
     [filteredFinanceRows]
   );
 
+  const totalCashForCampaign = useMemo(
+    () =>
+      entries.reduce((sum, entry) => {
+        const transactedAt = getLocalDateValueFromTimestamp(entry.transacted_at);
+        const normalizedDescription = (entry.description ?? "").toLowerCase();
+        const normalizedReference = (entry.reference_label ?? "").toLowerCase();
+        const normalizedReferenceDetail = (entry.reference_detail ?? "").toLowerCase();
+        const isCampaignEntry =
+          normalizedDescription.includes("campaign") ||
+          normalizedReference.includes("campaign") ||
+          normalizedReferenceDetail.includes("campaign");
+
+        if (
+          entry.entry_type !== "cash_out" ||
+          !isCampaignEntry ||
+          !transactedAt ||
+          transactedAt < fromDate ||
+          transactedAt > toDate
+        ) {
+          return sum;
+        }
+
+        return sum + Number(entry.amount ?? 0);
+      }, 0),
+    [entries, fromDate, toDate]
+  );
+
   const handleAddEntry = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -1195,6 +1223,13 @@ export function FinancePage({ userId, role }: FinancePageProps) {
           <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalCashOut)}</p>
           <p className="text-xs text-gray-500 mt-2">All outgoing payments within the selected date range.</p>
         </div>
+        {isSuperAdmin && (
+          <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+            <p className="text-sm font-medium text-gray-500 mb-2">Cash for Campaign</p>
+            <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalCashForCampaign)}</p>
+            <p className="text-xs text-gray-500 mt-2">Outgoing campaign-related cash within the selected date range.</p>
+          </div>
+        )}
       </div>
 
       <div className="mb-6 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">

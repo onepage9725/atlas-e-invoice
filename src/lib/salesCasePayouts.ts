@@ -1,4 +1,4 @@
-import { getCommissionStructureTotal, type CommissionStructure } from "./commissionStructures";
+import { type CommissionStructure } from "./commissionStructures";
 
 type SalesCasePayoutSource = {
   created_by: string | null;
@@ -193,7 +193,12 @@ export const buildCommissionStructureByTotalPercentage = (
   structureId = `${sourceStructure.id}-scaled`,
   structureLabel = sourceStructure.label,
 ) => {
-  const sourceTotal = getCommissionStructureTotal(sourceStructure);
+  const campaignContribution = Math.max(sourceStructure.campaign_contribution ?? 0, 0);
+  const companyWeight = Math.max((sourceStructure.company_commission ?? 0) - campaignContribution, 0);
+  const agentWeight = sourceStructure.agent_commission ?? 0;
+  const preLeaderWeight = sourceStructure.pre_leader_override ?? 0;
+  const leaderWeight = sourceStructure.leader_override ?? 0;
+  const sourceTotal = companyWeight + agentWeight + preLeaderWeight + leaderWeight;
 
   if (sourceTotal <= 0 || totalPercentage <= 0) {
     return null;
@@ -205,10 +210,11 @@ export const buildCommissionStructureByTotalPercentage = (
     ...sourceStructure,
     id: structureId,
     label: structureLabel,
-    company_commission: (sourceStructure.company_commission ?? 0) * scale,
-    agent_commission: (sourceStructure.agent_commission ?? 0) * scale,
-    pre_leader_override: (sourceStructure.pre_leader_override ?? 0) * scale,
-    leader_override: (sourceStructure.leader_override ?? 0) * scale,
+    campaign_contribution: 0,
+    company_commission: companyWeight * scale,
+    agent_commission: agentWeight * scale,
+    pre_leader_override: preLeaderWeight * scale,
+    leader_override: leaderWeight * scale,
     direct_commission: null,
     holding_commission: null,
   } satisfies CommissionStructure;

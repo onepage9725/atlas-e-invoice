@@ -99,6 +99,7 @@ export function Sidebar({
     { name: "Finance", icon: DollarSign, isVisible: canViewFinance },
     { name: "E-Invoice", icon: FileText, isVisible: canViewEInvoice },
     { name: "Projects", icon: Briefcase },
+    { name: "Project Case", icon: FileText, isVisible: canViewPayout },
   ];
 
   useEffect(() => {

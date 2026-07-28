@@ -100,11 +100,13 @@ const formatProgressValue = (value: number) => {
   });
 };
 
-const getAvatarStyle = (profile: Pick<ProgressProfile, "avatar_url" | "avatar_position_x" | "avatar_position_y" | "avatar_zoom">) => ({
-  backgroundImage: `url(${profile.avatar_url || DEFAULT_AVATAR_URL})`,
-  backgroundPosition: `${profile.avatar_position_x ?? 50}% ${profile.avatar_position_y ?? 50}%`,
-  backgroundSize: `${(profile.avatar_zoom ?? 1) * 100}% ${(profile.avatar_zoom ?? 1) * 100}%`,
-  backgroundRepeat: "no-repeat",
+const getAvatarImageProps = (profile: Pick<ProgressProfile, "avatar_url" | "avatar_position_x" | "avatar_position_y" | "avatar_zoom">) => ({
+  src: profile.avatar_url || DEFAULT_AVATAR_URL,
+  style: {
+    objectPosition: `${profile.avatar_position_x ?? 50}% ${profile.avatar_position_y ?? 50}%`,
+    transform: `scale(${profile.avatar_zoom ?? 1})`,
+    transformOrigin: "center",
+  },
 });
 
 const getNextRankTarget = (rank: MemberRank) => {
@@ -341,6 +343,16 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
     () => profiles.filter((profile) => (profile.is_active ?? true) && isMemberProfile(profile)),
     [profiles]
   );
+
+  const profileLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+
+    profiles.forEach((profile) => {
+      map.set(profile.id, profile.name || profile.email || "Unknown user");
+    });
+
+    return map;
+  }, [profiles]);
 
   const leaderProfiles = useMemo(
     () => memberProfiles.filter((profile) => profile.role === "leader" || profile.rank === "leader"),
@@ -724,6 +736,8 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
             const summary = memberRankSummaries.get(profile.id);
             const resolvedRank = summary?.rank ?? "agent";
             const target = getNextRankTarget(resolvedRank);
+            const recruiterLabel = profile.recruit_by ? profileLabelById.get(profile.recruit_by) ?? "Unknown user" : "None";
+            const avatarImage = getAvatarImageProps(profile);
 
             return (
               <button
@@ -734,14 +748,19 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="h-12 w-12 shrink-0 rounded-full border border-gray-100 bg-gray-50"
-                      style={getAvatarStyle(profile)}
-                    />
+                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border border-gray-100 bg-gray-50">
+                      <img
+                        src={avatarImage.src}
+                        alt={`${profile.name || profile.email || "Member"} avatar`}
+                        className="h-full w-full object-contain"
+                        style={avatarImage.style}
+                      />
+                    </div>
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-gray-900">{profile.name || profile.email || "Unnamed member"}</p>
                       <p className="mt-1 text-sm text-gray-500">Current rank: {formatRankLabel(resolvedRank)}</p>
                       <p className="mt-1 text-xs text-gray-400">Eligible rank: {formatRankLabel(summary?.eligibleRank ?? resolvedRank)}</p>
+                      <p className="mt-1 text-xs text-gray-400">Recruited by: {recruiterLabel}</p>
                     </div>
                   </div>
                   <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600">

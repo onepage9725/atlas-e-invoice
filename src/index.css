@@ -32,3 +32,26 @@ textarea::placeholder {
   color: #9ca3af;
   -webkit-text-fill-color: #9ca3af;
 }
+
+@keyframes footer-heartbeat {
+  0%,
+  40%,
+  80%,
+  100% {
+    transform: scale(1);
+  }
+
+  20% {
+    transform: scale(1.22);
+  }
+
+  60% {
+    transform: scale(1.12);
+  }
+}
+
+.footer-heart {
+  display: inline-flex;
+  transform-origin: center;
+  animation: footer-heartbeat 1.25s ease-in-out infinite;
+}

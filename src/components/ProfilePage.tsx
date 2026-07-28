@@ -32,6 +32,7 @@ export function ProfilePage({ userId, role, onProfileUpdated }: ProfilePageProps
   const [success, setSuccess] = useState<string | null>(null);
 
   const canEditName = role === "admin" || role === "super_admin";
+  const avatarImageUrl = avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas";
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -239,15 +240,18 @@ export function ProfilePage({ userId, role, onProfileUpdated }: ProfilePageProps
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Profile Picture</label>
           <div className="flex items-center gap-4">
-            <div
-              className="w-16 h-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50"
-              style={{
-                backgroundImage: `url(${avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas"})`,
-                backgroundPosition: `${avatarX}% ${avatarY}%`,
-                backgroundSize: `${avatarZoom * 100}% ${avatarZoom * 100}%`,
-                backgroundRepeat: "no-repeat",
-              }}
-            />
+            <div className="h-16 w-16 overflow-hidden rounded-full border border-gray-200 bg-gray-50">
+              <img
+                src={avatarImageUrl}
+                alt="Profile preview"
+                className="h-full w-full object-contain"
+                style={{
+                  objectPosition: `${avatarX}% ${avatarY}%`,
+                  transform: `scale(${avatarZoom})`,
+                  transformOrigin: "center",
+                }}
+              />
+            </div>
             <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
               <Upload className="w-4 h-4 text-gray-500" />
               Upload Photo

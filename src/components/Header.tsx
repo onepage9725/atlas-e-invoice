@@ -34,6 +34,7 @@ export function Header({
   onMenuClick,
 }: HeaderProps) {
   const { language, toggleLanguage } = useLanguage();
+  const avatarImageUrl = avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas";
   const displayName = userName || userEmail;
   const posX = avatarPositionX ?? 50;
   const posY = avatarPositionY ?? 50;
@@ -243,25 +244,40 @@ export function Header({
         </div>
         <button
           type="button"
+          role="switch"
+          aria-checked={language !== "en"}
           onClick={toggleLanguage}
-          className="inline-flex h-8 items-center justify-center rounded-full border border-gray-200 px-2 text-sm hover:bg-gray-50"
+          className="inline-flex h-8 items-center gap-2 rounded-full border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-50"
           title={language === "en" ? "Switch to Chinese" : "切换到英文"}
           aria-label={language === "en" ? "Switch to Chinese" : "切换到英文"}
         >
-          {language === "en" ? "🌐" : "🀄"}
+          <span className={`${language === "en" ? "text-gray-900" : "text-gray-400"}`}>EN</span>
+          <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-gray-200 transition-colors">
+            <span
+              className={`absolute h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                language === "en" ? "translate-x-0.5" : "translate-x-[18px]"
+              }`}
+            />
+          </span>
+          <span className={`${language === "en" ? "text-gray-400" : "text-gray-900"}`}>中文</span>
         </button>
         <button
           type="button"
           onClick={onProfileClick}
-          className="w-8 h-8 rounded-full bg-gray-200 overflow-hidden border border-gray-200 cursor-pointer"
-          style={{
-            backgroundImage: `url(${avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas"})`,
-            backgroundPosition: `${posX}% ${posY}%`,
-            backgroundSize: `${zoom * 100}% ${zoom * 100}%`,
-            backgroundRepeat: "no-repeat",
-          }}
+          className="h-8 w-8 cursor-pointer overflow-hidden rounded-full border border-gray-200 bg-gray-50"
           aria-label="Open profile"
-        />
+        >
+          <img
+            src={avatarImageUrl}
+            alt="Profile avatar"
+            className="h-full w-full object-contain"
+            style={{
+              objectPosition: `${posX}% ${posY}%`,
+              transform: `scale(${zoom})`,
+              transformOrigin: "center",
+            }}
+          />
+        </button>
       </div>
     </header>
   );

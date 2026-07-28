@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { getMemberRankSummary, type MemberRankSummary, type RankCase, type RankPayout, type RankProfile } from "../lib/memberRanks";
 
 const roleOptions = ["super_admin", "admin", "leader", "agent"] as const;
-const createRoleOptions = ["super_admin", "admin", "leader", "agent"] as const;
+const createRoleOptions = ["super_admin", "admin", "agent"] as const;
 const memberRankOptions = ["agent", "pre_leader", "leader"] as const;
 
 const getDefaultMemberRankForRole = (role: string | null | undefined): (typeof memberRankOptions)[number] =>

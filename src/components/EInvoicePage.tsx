@@ -15,6 +15,7 @@ export type EInvoiceRecord = {
   invoice_number: string;
   invoice_date: string;
   bill_to: string;
+  qr_code: string | null;
   tax_rate: number;
   line_items: EInvoiceLineItem[] | null;
   received_amount?: number | null;

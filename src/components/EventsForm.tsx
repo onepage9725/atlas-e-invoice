@@ -393,9 +393,6 @@ export function EventsForm({ userId }: { userId: string }) {
                 <tr key={event.id} className="border-b border-gray-50">
                   <td className="px-6 py-3">
                     <div className="font-medium text-gray-900">{event.event_name}</div>
-                    <div className="text-xs text-gray-500">
-                      {event.description || "No description"}
-                    </div>
                   </td>
                   <td className="px-6 py-3 text-gray-600">
                     {event.start_date || "-"} - {event.end_date || "-"}

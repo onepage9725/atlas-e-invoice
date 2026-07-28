@@ -82,6 +82,11 @@ const formatDate = (value: string | null | undefined) => {
   return parsedDate.toLocaleDateString("en-MY");
 };
 
+const getLocalDateInputValue = (date: Date) => {
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 10);
+};
+
 const normalizeText = (value: string | null | undefined) => value?.trim().toLowerCase() ?? "";
 
 const getStoragePathFromPublicUrl = (publicUrl: string | null) => {
@@ -204,14 +209,18 @@ export function MyPaymentVoucherPage({
   userName: string | null;
   userEmail: string | null;
 }) {
+  const today = new Date();
+  const defaultFromDate = getLocalDateInputValue(new Date(today.getFullYear(), today.getMonth(), 1));
+  const defaultToDate = getLocalDateInputValue(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+
   const [payouts, setPayouts] = useState<MemberVoucherPayoutRow[]>([]);
   const [cases, setCases] = useState<SalesCaseVoucherInfo[]>([]);
   const [projects, setProjects] = useState<ProjectNameRow[]>([]);
   const [voucherEntries, setVoucherEntries] = useState<FinanceVoucherEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(defaultFromDate);
+  const [dateTo, setDateTo] = useState(defaultToDate);
   const [detailsSearch, setDetailsSearch] = useState("");
 
   useEffect(() => {

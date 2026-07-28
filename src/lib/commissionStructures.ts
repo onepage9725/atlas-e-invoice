@@ -3,6 +3,7 @@ export type CommissionStructure = {
   label: string | null;
   min_units: number | null;
   max_units: number | null;
+  campaign_contribution?: number | null;
   company_commission: number | null;
   agent_commission: number | null;
   pre_leader_override: number | null;
@@ -12,6 +13,7 @@ export type CommissionStructure = {
 };
 
 type ProjectCommissionSource = {
+  campaign_contribution?: unknown;
   company_commission?: unknown;
   agent_commission?: unknown;
   pre_leader_override?: unknown;
@@ -59,6 +61,7 @@ const normalizeCommissionStructure = (
     label: toNullableString(record.label),
     min_units: toNullableNumber(record.min_units),
     max_units: toNullableNumber(record.max_units),
+    campaign_contribution: toNullableNumber(record.campaign_contribution),
     company_commission: toNullableNumber(record.company_commission),
     agent_commission: toNullableNumber(record.agent_commission),
     pre_leader_override: toNullableNumber(record.pre_leader_override),
@@ -69,12 +72,13 @@ const normalizeCommissionStructure = (
 };
 
 export const buildDefaultCommissionStructure = (
-  source: Pick<ProjectCommissionSource, "company_commission" | "agent_commission" | "pre_leader_override" | "leader_override" | "direct_commission" | "holding_commission">,
+  source: Pick<ProjectCommissionSource, "campaign_contribution" | "company_commission" | "agent_commission" | "pre_leader_override" | "leader_override" | "direct_commission" | "holding_commission">,
 ): CommissionStructure => ({
   id: "default-tier",
   label: "Default Tier",
   min_units: null,
   max_units: null,
+  campaign_contribution: toNullableNumber(source.campaign_contribution),
   company_commission: toNullableNumber(source.company_commission),
   agent_commission: toNullableNumber(source.agent_commission),
   pre_leader_override: toNullableNumber(source.pre_leader_override),

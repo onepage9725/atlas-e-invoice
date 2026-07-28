@@ -17,6 +17,7 @@ import { ProfilePage } from "./components/ProfilePage";
 import { RankingPage } from "./components/RankingPage";
 import { RankProgressPage } from "./components/RankProgressPage";
 import { TeamPage } from "./components/TeamPage";
+import { ProjectCasePage } from "./components/ProjectCasePage";
 import { AuthPage } from "./components/AuthPage";
 import { isSupabaseConfigured, supabase } from "./lib/supabaseClient";
 
@@ -278,7 +279,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-body)]">
+    <div className="min-h-screen bg-[var(--color-body)] flex flex-col">
       <Sidebar
         activeView={activeView}
         setActiveView={handleSetActiveView}
@@ -315,7 +316,7 @@ function App() {
         onSignOut={handleSignOut}
         onMenuClick={() => setIsSidebarOpen((current) => !current)}
       />
-      <main>
+      <main className="flex-1">
         {activeView === "Dashboard" && (
           <Dashboard role={normalizedProfileRole} rank={normalizedProfileRank} userId={sessionUserId} />
         )}
@@ -516,7 +517,38 @@ function App() {
             onProfileUpdated={handleProfileUpdated}
           />
         )}
+        {activeView === "Project Case" &&
+          (isSuperAdmin ? (
+            <ProjectCasePage />
+          ) : (
+            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
+                You do not have permission to access this section.
+              </div>
+            </div>
+          ))}
       </main>
+      <footer className="border-t border-gray-100 bg-white/90 md:ml-[220px] md:w-[calc(100%-220px)]">
+        <div className="flex flex-col gap-3 px-4 py-3 text-sm text-gray-600 md:flex-row md:items-center md:justify-between md:px-8">
+          <p className="font-medium text-gray-700">Atlas Olsen ERP</p>
+          <div className="flex items-center gap-2 md:justify-end">
+            <img
+              src="/OnePage Round logo.png"
+              alt="OnePage round logo"
+              className="h-7 w-7 rounded-full object-contain"
+            />
+            <p className="flex items-center gap-1.5 text-gray-600">
+              <span>Made with</span>
+              <span className="footer-heart" aria-label="love" role="img">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-red-500" aria-hidden="true">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                </svg>
+              </span>
+              <span>by OnePage Digital Solution</span>
+            </p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

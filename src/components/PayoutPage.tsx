@@ -75,7 +75,7 @@ type PayoutDisplayRow =
       salesCaseId: string;
       record: SalesCaseRecord | null;
       project: ProjectOption | null;
-      memberLabel: "Company";
+      memberLabel: string;
       spaPrice: number | null;
       nettPrice: number | null;
       commissionPercentage: number;
@@ -85,6 +85,7 @@ type PayoutDisplayRow =
       amount: number;
       payoutLabel: string | null;
       payoutType: "standard" | "tier_upgrade_top_up";
+      entryScope: "company_commission";
       sourceCommissionStructureId: string | null;
       targetCommissionStructureId: string | null;
       paidAt: string | null;
@@ -195,12 +196,14 @@ const getCompanyReceiptKey = (
   payoutType: string | null | undefined,
   sourceCommissionStructureId: string | null | undefined,
   targetCommissionStructureId: string | null | undefined,
+  entryScope: string | null | undefined,
 ) =>
   [
     salesCaseId,
     payoutType || "standard",
     sourceCommissionStructureId || "base",
     targetCommissionStructureId || "base",
+    entryScope || "company_commission",
   ].join(":");
 
 const getCompanyPayoutLabel = (
@@ -230,12 +233,14 @@ const getCompanyRowKey = (
   payoutType: string | null | undefined,
   sourceCommissionStructureId: string | null | undefined,
   targetCommissionStructureId: string | null | undefined,
+  entryScope: string | null | undefined,
 ) =>
   getCompanyReceiptKey(
     salesCaseId,
     payoutType,
     sourceCommissionStructureId,
     targetCommissionStructureId,
+    entryScope,
   );
 
 export function PayoutPage({
@@ -314,6 +319,7 @@ export function PayoutPage({
         entry.payout_type,
         entry.source_commission_structure_id,
         entry.target_commission_structure_id,
+        entry.entry_scope,
       );
 
       if (entry.entry_scope === "company_commission_hidden") {
@@ -383,8 +389,16 @@ export function PayoutPage({
             commissionStructure.label,
           )
         : null;
-      const receiptKey = getCompanyRowKey(salesCaseId, "standard", null, null);
+      const receiptKey = getCompanyRowKey(salesCaseId, "standard", null, null, "company_commission");
       const receiptSummary = companyReceiptSummary.summaryMap.get(receiptKey);
+      const campaignReceiptKey = getCompanyRowKey(
+        salesCaseId,
+        "standard",
+        "campaign_contribution",
+        null,
+        "company_commission"
+      );
+      const campaignReceiptSummary = companyReceiptSummary.summaryMap.get(campaignReceiptKey);
 
       if (
         !record ||
@@ -392,7 +406,7 @@ export function PayoutPage({
         !commissionStructure ||
         !directCommissionStructure ||
         record.nett_price === null ||
-        (directCommissionStructure.company_commission ?? 0) === 0 ||
+        (directCommissionStructure.company_commission ?? 0) <= 0 ||
         companyReceiptSummary.hiddenKeys.has(receiptKey)
       ) {
         return [];
@@ -401,32 +415,64 @@ export function PayoutPage({
       const grossCompanyAmount = Number(((record.nett_price * (directCommissionStructure.company_commission ?? 0)) / 100).toFixed(2));
       const totalReceived = Number((receiptSummary?.totalReceived ?? 0).toFixed(2));
       const remainingAmount = Number(Math.max(grossCompanyAmount - totalReceived, 0).toFixed(2));
+      const campaignPercentage = Math.max(commissionStructure.campaign_contribution ?? 0, 0);
+      const grossCampaignAmount = Number(((record.nett_price * campaignPercentage) / 100).toFixed(2));
+      const totalCampaignReceived = Number((campaignReceiptSummary?.totalReceived ?? 0).toFixed(2));
+      const remainingCampaignAmount = Number(Math.max(grossCampaignAmount - totalCampaignReceived, 0).toFixed(2));
 
-      if (remainingAmount <= 0) {
-        return [];
+      const rows: PayoutDisplayRow[] = [];
+
+      if (remainingAmount > 0) {
+        rows.push({
+          id: `company-${salesCaseId}`,
+          rowType: "company" as const,
+          salesCaseId,
+          record,
+          project,
+          memberLabel: "Company" as const,
+          spaPrice: record.spa_price,
+          nettPrice: record.nett_price,
+          commissionPercentage: directCommissionStructure.company_commission ?? 0,
+          preLeaderOverridePercentage: 0,
+          leaderOverridePercentage: 0,
+          totalAmount: grossCompanyAmount,
+          amount: remainingAmount,
+          payoutLabel: null,
+          payoutType: "standard" as const,
+          entryScope: "company_commission" as const,
+          sourceCommissionStructureId: null,
+          targetCommissionStructureId: null,
+          paidAt: receiptSummary?.latestReceivedAt ?? null,
+          paymentReceiptUrl: receiptSummary?.latestReceiptUrl ?? null,
+        });
       }
 
-      return [{
-        id: `company-${salesCaseId}`,
-        rowType: "company" as const,
-        salesCaseId,
-        record,
-        project,
-        memberLabel: "Company" as const,
-        spaPrice: record.spa_price,
-        nettPrice: record.nett_price,
-        commissionPercentage: directCommissionStructure.company_commission ?? 0,
-        preLeaderOverridePercentage: 0,
-        leaderOverridePercentage: 0,
-        totalAmount: grossCompanyAmount,
-        amount: remainingAmount,
-        payoutLabel: null,
-        payoutType: "standard" as const,
-        sourceCommissionStructureId: null,
-        targetCommissionStructureId: null,
-        paidAt: receiptSummary?.latestReceivedAt ?? null,
-        paymentReceiptUrl: receiptSummary?.latestReceiptUrl ?? null,
-      }];
+      if (campaignPercentage > 0 && remainingCampaignAmount > 0) {
+        rows.push({
+          id: `company-${salesCaseId}-campaign`,
+          rowType: "company" as const,
+          salesCaseId,
+          record,
+          project,
+          memberLabel: "Company" as const,
+          spaPrice: record.spa_price,
+          nettPrice: record.nett_price,
+          commissionPercentage: campaignPercentage,
+          preLeaderOverridePercentage: 0,
+          leaderOverridePercentage: 0,
+          totalAmount: grossCampaignAmount,
+          amount: remainingCampaignAmount,
+          payoutLabel: "Campaign Contribute",
+          payoutType: "standard" as const,
+          entryScope: "company_commission" as const,
+          sourceCommissionStructureId: "campaign_contribution",
+          targetCommissionStructureId: null,
+          paidAt: campaignReceiptSummary?.latestReceivedAt ?? null,
+          paymentReceiptUrl: campaignReceiptSummary?.latestReceiptUrl ?? null,
+        });
+      }
+
+      return rows;
     });
 
     const topUpCompanyRows: PayoutDisplayRow[] = Array.from(
@@ -439,6 +485,7 @@ export function PayoutPage({
               payout.payout_type,
               payout.source_commission_structure_id,
               payout.target_commission_structure_id,
+              "company_commission",
             ),
             payout,
           ])
@@ -468,6 +515,7 @@ export function PayoutPage({
         payout.payout_type,
         payout.source_commission_structure_id,
         payout.target_commission_structure_id,
+        "company_commission",
       );
       const receiptSummary = companyReceiptSummary.summaryMap.get(receiptKey);
 
@@ -510,6 +558,7 @@ export function PayoutPage({
           payout.target_commission_structure_label,
         ),
         payoutType: "tier_upgrade_top_up" as const,
+        entryScope: "company_commission" as const,
         sourceCommissionStructureId: payout.source_commission_structure_id,
         targetCommissionStructureId: payout.target_commission_structure_id,
         paidAt: receiptSummary?.latestReceivedAt ?? null,
@@ -544,7 +593,12 @@ export function PayoutPage({
   );
 
   const companyPendingCaseCount = useMemo(
-    () => payoutDisplayRows.filter((row) => row.rowType === "company").length,
+    () =>
+      new Set(
+        payoutDisplayRows
+          .filter((row): row is Extract<PayoutDisplayRow, { rowType: "company" }> => row.rowType === "company")
+          .map((row) => row.salesCaseId)
+      ).size,
     [payoutDisplayRows]
   );
 
@@ -709,14 +763,16 @@ export function PayoutPage({
             entry.payout_type,
             entry.source_commission_structure_id,
             entry.target_commission_structure_id,
+            entry.entry_scope,
           ) ===
             getCompanyReceiptKey(
               pendingCompanyReceive.salesCaseId,
               pendingCompanyReceive.payoutType,
               pendingCompanyReceive.sourceCommissionStructureId,
               pendingCompanyReceive.targetCommissionStructureId,
+              pendingCompanyReceive.entryScope,
             ) &&
-          entry.entry_scope === "company_commission"
+          entry.entry_scope === pendingCompanyReceive.entryScope
       )
       .sort((left, right) => {
         const rightTime = new Date(right.transacted_at || right.created_at).getTime();
@@ -1311,7 +1367,10 @@ export function PayoutPage({
       const { error: insertError } = await supabase.from("finance_entries").insert({
         entry_type: "cash_in",
         amount: Number(parsedAmount.toFixed(2)),
-        description: "Company commission received from developer",
+        description:
+          pendingCompanyReceive.sourceCommissionStructureId === "campaign_contribution"
+            ? "Campaign contribution received from developer"
+            : "Company commission received from developer",
         reference_label: caseName || "Company commission",
         reference_detail: companyReceiveReference.trim(),
         attachment_url: attachmentUrl,

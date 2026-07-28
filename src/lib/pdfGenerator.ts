@@ -18,7 +18,7 @@ export type EInvoiceRecord = {
   line_items: EInvoiceLineItem[] | null;
   created_at: string;
   updated_at: string;
-  qr_code?: string; // Base64 string for LHDN validation
+  qr_code?: string | null; // Base64 string for LHDN validation
 };
 
 const formatAmount = (value: number) => {

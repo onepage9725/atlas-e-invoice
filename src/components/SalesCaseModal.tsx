@@ -11,6 +11,7 @@ import {
   getCaseCommissionStructure,
   getCommissionStructureLabel,
   getDirectCommissionPercentage,
+  getHoldingCommissionPercentage,
   type CommissionStructure,
 } from "../lib/commissionStructures";
 import { buildCommissionStructureByTotalPercentage } from "../lib/salesCasePayouts";
@@ -574,6 +575,94 @@ export function SalesCaseModal({
     const splitPreLeaderPercentage =
       (directCommissionStructure.pre_leader_override ?? 0) / participants.length;
     const splitLeaderPercentage = (directCommissionStructure.leader_override ?? 0) / participants.length;
+
+    const rowsByKey = new Map<string, CommissionRow>();
+
+    const appendRow = (
+      profile: ProfileOption | null,
+      type: CommissionRow["type"],
+      percentage: number
+    ) => {
+      if (!profile || percentage === 0) {
+        return;
+      }
+
+      const key = `${profile.id}-${type}`;
+      const existing = rowsByKey.get(key);
+      const nextPercentage = (existing?.percentage ?? 0) + percentage;
+
+      rowsByKey.set(key, {
+        id: key,
+        profileId: profile.id,
+        label: getProfileLabel(profile),
+        rank: profile.rank || "member",
+        percentage: nextPercentage,
+        amount: nettPrice * (nextPercentage / 100),
+        type,
+      });
+    };
+
+    participants.forEach((participant) => {
+      appendRow(participant, "agent", splitAgentPercentage);
+
+      const chain = getLeaderChain(participant);
+
+      if (participant.rank === "agent") {
+        if (chain.preLeader) {
+          appendRow(chain.preLeader, "pre_leader", splitPreLeaderPercentage);
+        } else {
+          appendRow(chain.leader, "pre_leader", splitPreLeaderPercentage);
+        }
+        appendRow(chain.leader, "leader", splitLeaderPercentage);
+        return;
+      }
+
+      if (participant.rank === "pre_leader") {
+        appendRow(participant, "pre_leader", splitPreLeaderPercentage);
+        appendRow(chain.leader, "leader", splitLeaderPercentage);
+        return;
+      }
+
+      if (participant.rank === "leader") {
+        appendRow(participant, "pre_leader", splitPreLeaderPercentage);
+        appendRow(participant, "leader", splitLeaderPercentage);
+      }
+    });
+
+    return Array.from(rowsByKey.values());
+  }, [creatorProfile, selectedCommissionStructure, selectedInvolvedProfile, selectedProject, formData.nettPrice]);
+
+  const holdingCommissionRows = useMemo(() => {
+    if (!selectedProject || !selectedCommissionStructure) {
+      return [] as CommissionRow[];
+    }
+
+    const holdingPercentage = getHoldingCommissionPercentage(selectedCommissionStructure);
+    const holdingCommissionStructure = buildCommissionStructureByTotalPercentage(
+      selectedCommissionStructure,
+      holdingPercentage,
+      `${selectedCommissionStructure.id}-holding`,
+      selectedCommissionStructure.label,
+    );
+
+    if (!holdingCommissionStructure) {
+      return [] as CommissionRow[];
+    }
+
+    const nettPrice = toNumberOrNull(formData.nettPrice) ?? 0;
+    const participants = [creatorProfile, selectedInvolvedProfile].filter(
+      (profile, index, array): profile is ProfileOption =>
+        Boolean(profile) && array.findIndex((item) => item?.id === profile?.id) === index
+    );
+
+    if (participants.length === 0) {
+      return [] as CommissionRow[];
+    }
+
+    const splitAgentPercentage = (holdingCommissionStructure.agent_commission ?? 0) / participants.length;
+    const splitPreLeaderPercentage =
+      (holdingCommissionStructure.pre_leader_override ?? 0) / participants.length;
+    const splitLeaderPercentage = (holdingCommissionStructure.leader_override ?? 0) / participants.length;
 
     const rowsByKey = new Map<string, CommissionRow>();
 
@@ -1589,32 +1678,72 @@ export function SalesCaseModal({
                 )}
               </div>
 
-              <div className="space-y-2">
-                {commissionRows.length > 0 ? (
-                  commissionRows.map((row) => (
-                    <div
-                      key={row.id}
-                      className="flex items-center justify-between rounded-lg bg-white px-3 py-2 border border-gray-100 text-sm"
-                    >
-                      <div>
-                        <div className="font-medium text-gray-800">{row.label}</div>
-                        <div className="text-xs text-gray-500">
-                          {commissionTypeLabel[row.type]} • {row.rank.replace("_", " ")}
+              <div className="space-y-4">
+                <div>
+                  <h5 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                    Direct Commission Calculation
+                  </h5>
+                  <div className="mt-2 space-y-2">
+                    {commissionRows.length > 0 ? (
+                      commissionRows.map((row) => (
+                        <div
+                          key={`direct-${row.id}`}
+                          className="flex items-center justify-between rounded-lg bg-white px-3 py-2 border border-gray-100 text-sm"
+                        >
+                          <div>
+                            <div className="font-medium text-gray-800">{row.label}</div>
+                            <div className="text-xs text-gray-500">
+                              {commissionTypeLabel[row.type]} • {row.rank.replace("_", " ")}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold text-gray-800">
+                              {formatCommissionPercentage(row.percentage)}%
+                            </div>
+                            <div className="text-xs text-gray-500">{formatCommissionAmount(row.amount)}</div>
+                          </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="rounded-lg bg-white px-3 py-2 border border-gray-100 text-sm text-gray-500">
+                        No direct commission applies yet.
                       </div>
-                      <div className="text-right">
-                        <div className="font-semibold text-gray-800">
-                          {formatCommissionPercentage(row.percentage)}%
-                        </div>
-                        <div className="text-xs text-gray-500">{formatCommissionAmount(row.amount)}</div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-lg bg-white px-3 py-2 border border-gray-100 text-sm text-gray-500">
-                    No member commission applies yet. Select a project and involved salesperson.
+                    )}
                   </div>
-                )}
+                </div>
+
+                <div>
+                  <h5 className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-700">
+                    Holding Commission Calculation
+                  </h5>
+                  <div className="mt-2 space-y-2">
+                    {holdingCommissionRows.length > 0 ? (
+                      holdingCommissionRows.map((row) => (
+                        <div
+                          key={`holding-${row.id}`}
+                          className="flex items-center justify-between rounded-lg bg-white px-3 py-2 border border-gray-100 text-sm"
+                        >
+                          <div>
+                            <div className="font-medium text-gray-800">{row.label}</div>
+                            <div className="text-xs text-gray-500">
+                              {commissionTypeLabel[row.type]} • {row.rank.replace("_", " ")}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold text-gray-800">
+                              {formatCommissionPercentage(row.percentage)}%
+                            </div>
+                            <div className="text-xs text-gray-500">{formatCommissionAmount(row.amount)}</div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-lg bg-white px-3 py-2 border border-gray-100 text-sm text-gray-500">
+                        No holding commission applies yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {paidReceiptRows.length > 0 && (

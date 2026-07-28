@@ -61,6 +61,7 @@ type CommissionStructureForm = {
   minUnits: string;
   maxUnits: string;
   totalCommission: string;
+  campaignContribution: string;
   companyCommission: string;
   agentCommission: string;
   preLeaderOverride: string;
@@ -69,7 +70,7 @@ type CommissionStructureForm = {
   holdingCommission: string;
 };
 
-type HoldingShareBreakdown = {
+type CommissionShareBreakdown = {
   companyShare: number;
   agentShare: number;
   preLeaderShare: number;
@@ -84,6 +85,7 @@ const createEmptyCommissionStructure = (index: number): CommissionStructureForm 
   minUnits: "",
   maxUnits: "",
   totalCommission: "",
+  campaignContribution: "",
   companyCommission: "",
   agentCommission: "",
   preLeaderOverride: "",
@@ -157,15 +159,24 @@ const toCommissionNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getHoldingShareBreakdown = (structure: CommissionStructureForm): HoldingShareBreakdown => {
-  const company = toCommissionNumber(structure.companyCommission);
+const formatCommissionInput = (num: number) =>
+  num.toFixed(3).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+
+const clampCommission = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const getCommissionShareBreakdown = (
+  structure: CommissionStructureForm,
+  commissionPercentage: number
+): CommissionShareBreakdown => {
+  const campaignContribution = Math.max(toCommissionNumber(structure.campaignContribution), 0);
+  const rawCompany = toCommissionNumber(structure.companyCommission);
+  const company = Math.max(rawCompany - campaignContribution, 0);
   const agent = toCommissionNumber(structure.agentCommission);
   const preLeader = toCommissionNumber(structure.preLeaderOverride);
   const leader = toCommissionNumber(structure.leaderOverride);
-  const holding = toCommissionNumber(structure.holdingCommission);
   const totalBreakdown = company + agent + preLeader + leader;
 
-  if (holding <= 0 || totalBreakdown <= 0) {
+  if (commissionPercentage <= 0 || totalBreakdown <= 0) {
     return {
       companyShare: 0,
       agentShare: 0,
@@ -175,12 +186,18 @@ const getHoldingShareBreakdown = (structure: CommissionStructureForm): HoldingSh
   }
 
   return {
-    companyShare: Number(((holding * company) / totalBreakdown).toFixed(3)),
-    agentShare: Number(((holding * agent) / totalBreakdown).toFixed(3)),
-    preLeaderShare: Number(((holding * preLeader) / totalBreakdown).toFixed(3)),
-    leaderShare: Number(((holding * leader) / totalBreakdown).toFixed(3)),
+    companyShare: Number(((commissionPercentage * company) / totalBreakdown).toFixed(3)),
+    agentShare: Number(((commissionPercentage * agent) / totalBreakdown).toFixed(3)),
+    preLeaderShare: Number(((commissionPercentage * preLeader) / totalBreakdown).toFixed(3)),
+    leaderShare: Number(((commissionPercentage * leader) / totalBreakdown).toFixed(3)),
   };
 };
+
+const getHoldingShareBreakdown = (structure: CommissionStructureForm): CommissionShareBreakdown =>
+  getCommissionShareBreakdown(structure, toCommissionNumber(structure.holdingCommission));
+
+const getDirectShareBreakdown = (structure: CommissionStructureForm): CommissionShareBreakdown =>
+  getCommissionShareBreakdown(structure, toCommissionNumber(structure.directCommission));
 
 const formatDate = (value: string | null) => {
   if (!value) return "-";
@@ -257,6 +274,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
 
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const canManageProjects = role === "admin" || role === "super_admin";
+  const canViewCampaign = role === "super_admin";
   const canDeleteProjects = role === "super_admin";
   const canViewHiddenProjects = canManageProjects;
   const projectCount = useMemo(() => projects.length, [projects]);
@@ -336,6 +354,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
             ? {
                 ...structure,
                 totalCommission: "",
+                campaignContribution: "",
                 companyCommission: "",
                 agentCommission: "",
                 preLeaderOverride: "",
@@ -355,25 +374,171 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
       return;
     }
 
-    const normalizeNumber = (num: number) =>
-      num.toFixed(3).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
-
     setFormData((prev) => ({
       ...prev,
       commissionStructures: prev.commissionStructures.map((structure) =>
-        structure.id === structureId
-          ? {
-              ...structure,
-              totalCommission: value,
-              companyCommission: normalizeNumber(total * 0.3),
-              agentCommission: normalizeNumber(total * 0.5),
-              preLeaderOverride: normalizeNumber(total * 0.1),
-              leaderOverride: normalizeNumber(total * 0.1),
-              directCommission: structure.directCommission || normalizeNumber(total),
-              holdingCommission: structure.holdingCommission || "0",
-            }
-          : structure
+        structure.id !== structureId
+          ? structure
+          : (() => {
+              const rawCampaign = Number(structure.campaignContribution || 0);
+              const campaignContribution = Number.isFinite(rawCampaign)
+                ? Math.min(Math.max(rawCampaign, 0), Math.max(total, 0))
+                : 0;
+              const splitBase = Math.max(total - campaignContribution, 0);
+              const currentDirect = Number(structure.directCommission || 0);
+              const currentHolding = Number(structure.holdingCommission || 0);
+              const currentReleaseTotal =
+                (Number.isFinite(currentDirect) ? Math.max(currentDirect, 0) : 0) +
+                (Number.isFinite(currentHolding) ? Math.max(currentHolding, 0) : 0);
+              const adjustedDirect =
+                currentReleaseTotal > 0
+                  ? Number(((splitBase * Math.max(currentDirect, 0)) / currentReleaseTotal).toFixed(3))
+                  : splitBase;
+              const adjustedHolding = Number((splitBase - adjustedDirect).toFixed(3));
+
+              return {
+                ...structure,
+                totalCommission: value,
+                campaignContribution: campaignContribution > 0 ? formatCommissionInput(campaignContribution) : "",
+                companyCommission: formatCommissionInput(splitBase * 0.3 + campaignContribution),
+                agentCommission: formatCommissionInput(splitBase * 0.5),
+                preLeaderOverride: formatCommissionInput(splitBase * 0.1),
+                leaderOverride: formatCommissionInput(splitBase * 0.1),
+                directCommission: formatCommissionInput(adjustedDirect),
+                holdingCommission: formatCommissionInput(adjustedHolding),
+              };
+            })()
       ),
+    }));
+  };
+
+  const handleTierCampaignContributionChange = (structureId: string, value: string) => {
+    if (value !== "" && Number.isNaN(Number(value))) {
+      handleCommissionStructureChange(structureId, "campaignContribution", value);
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      commissionStructures: prev.commissionStructures.map((structure) => {
+        if (structure.id !== structureId) {
+          return structure;
+        }
+
+        const total = Number(structure.totalCommission);
+
+        if (Number.isNaN(total)) {
+          return {
+            ...structure,
+            campaignContribution: value,
+          };
+        }
+
+        const rawCampaign = value === "" ? 0 : Number(value);
+        const campaignContribution = Number.isFinite(rawCampaign)
+          ? Math.min(Math.max(rawCampaign, 0), Math.max(total, 0))
+          : 0;
+        const splitBase = Math.max(total - campaignContribution, 0);
+        const currentDirect = Number(structure.directCommission || 0);
+        const currentHolding = Number(structure.holdingCommission || 0);
+        const currentReleaseTotal =
+          (Number.isFinite(currentDirect) ? Math.max(currentDirect, 0) : 0) +
+          (Number.isFinite(currentHolding) ? Math.max(currentHolding, 0) : 0);
+        const adjustedDirect =
+          currentReleaseTotal > 0
+            ? Number(((splitBase * Math.max(currentDirect, 0)) / currentReleaseTotal).toFixed(3))
+            : splitBase;
+        const adjustedHolding = Number((splitBase - adjustedDirect).toFixed(3));
+
+        return {
+          ...structure,
+          campaignContribution: value === "" ? "" : formatCommissionInput(campaignContribution),
+          companyCommission: formatCommissionInput(splitBase * 0.3 + campaignContribution),
+          agentCommission: formatCommissionInput(splitBase * 0.5),
+          preLeaderOverride: formatCommissionInput(splitBase * 0.1),
+          leaderOverride: formatCommissionInput(splitBase * 0.1),
+          directCommission: formatCommissionInput(adjustedDirect),
+          holdingCommission: formatCommissionInput(adjustedHolding),
+        };
+      }),
+    }));
+  };
+
+  const handleDirectCommissionChange = (structureId: string, value: string) => {
+    if (value !== "" && Number.isNaN(Number(value))) {
+      handleCommissionStructureChange(structureId, "directCommission", value);
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      commissionStructures: prev.commissionStructures.map((structure) => {
+        if (structure.id !== structureId) {
+          return structure;
+        }
+
+        const total = Number(structure.totalCommission);
+        const campaign = Number(structure.campaignContribution || 0);
+
+        if (Number.isNaN(total)) {
+          return {
+            ...structure,
+            directCommission: value,
+          };
+        }
+
+        const releaseTotal = Math.max(total - (Number.isFinite(campaign) ? Math.max(campaign, 0) : 0), 0);
+        const rawDirect = value === "" ? 0 : Number(value);
+        const clampedDirect = Number.isFinite(rawDirect)
+          ? clampCommission(rawDirect, 0, releaseTotal)
+          : 0;
+        const holding = Number((releaseTotal - clampedDirect).toFixed(3));
+
+        return {
+          ...structure,
+          directCommission: value === "" ? "" : formatCommissionInput(clampedDirect),
+          holdingCommission: formatCommissionInput(holding),
+        };
+      }),
+    }));
+  };
+
+  const handleHoldingCommissionChange = (structureId: string, value: string) => {
+    if (value !== "" && Number.isNaN(Number(value))) {
+      handleCommissionStructureChange(structureId, "holdingCommission", value);
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      commissionStructures: prev.commissionStructures.map((structure) => {
+        if (structure.id !== structureId) {
+          return structure;
+        }
+
+        const total = Number(structure.totalCommission);
+        const campaign = Number(structure.campaignContribution || 0);
+
+        if (Number.isNaN(total)) {
+          return {
+            ...structure,
+            holdingCommission: value,
+          };
+        }
+
+        const releaseTotal = Math.max(total - (Number.isFinite(campaign) ? Math.max(campaign, 0) : 0), 0);
+        const rawHolding = value === "" ? 0 : Number(value);
+        const clampedHolding = Number.isFinite(rawHolding)
+          ? clampCommission(rawHolding, 0, releaseTotal)
+          : 0;
+        const direct = Number((releaseTotal - clampedHolding).toFixed(3));
+
+        return {
+          ...structure,
+          directCommission: formatCommissionInput(direct),
+          holdingCommission: value === "" ? "" : formatCommissionInput(clampedHolding),
+        };
+      }),
     }));
   };
 
@@ -457,6 +622,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
       label: "Default Tier",
       min_units: null,
       max_units: null,
+      campaign_contribution: null,
       company_commission: project.company_commission,
       agent_commission: project.agent_commission,
       pre_leader_override: project.pre_leader_override,
@@ -512,6 +678,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
         minUnits: "",
         maxUnits: "",
         totalCommission: formatEditableCommissionValue(totalCommissionValue),
+        campaignContribution: formatEditableCommissionValue(commissionStructure.campaign_contribution ?? 0),
         companyCommission: formatEditableCommissionValue(commissionStructure.company_commission),
         agentCommission: formatEditableCommissionValue(commissionStructure.agent_commission),
         preLeaderOverride: formatEditableCommissionValue(commissionStructure.pre_leader_override),
@@ -682,6 +849,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
       label: "Default Tier",
       min_units: null,
       max_units: null,
+      campaign_contribution: toNumberOrNull(singleStructure.campaignContribution),
       company_commission: toNumberOrNull(singleStructure.companyCommission),
       agent_commission: toNumberOrNull(singleStructure.agentCommission),
       pre_leader_override: toNumberOrNull(singleStructure.preLeaderOverride),
@@ -924,7 +1092,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                   setSelectedProject(project);
                 }
               }}
-              className="overflow-hidden rounded-2xl border border-gray-100 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
+              className="flex h-full flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
             >
               <div className="bg-gradient-to-b from-slate-50 to-white px-5 pt-5">
                 <div className="relative aspect-[16/9] w-full overflow-hidden rounded-2xl bg-slate-100 shadow-sm">
@@ -954,13 +1122,13 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                 </div>
               </div>
 
-              <div className="space-y-3 p-5">
+              <div className="flex flex-1 flex-col p-5">
                 <div>
                   <h4 className="break-words text-base font-semibold text-gray-900">{project.project_name}</h4>
                   <p className="break-words text-sm text-gray-500">{project.developer_name || "-"}</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-gray-400">Type</p>
                     <p className="mt-1 font-medium text-gray-700">{project.project_type || "-"}</p>
@@ -972,7 +1140,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                 </div>
 
                 {canManageProjects && (
-                  <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
+                  <div className="mt-auto flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
                     <button
                       type="button"
                       onClick={(event) => {
@@ -1413,6 +1581,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                       className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50/80 to-blue-50/40 shadow-sm transition hover:border-slate-300 hover:shadow-md"
                     >
                       {(() => {
+                        const directShare = getDirectShareBreakdown(structure);
                         const holdingShare = getHoldingShareBreakdown(structure);
 
                         return (
@@ -1430,6 +1599,11 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                               <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                                 Total {structure.totalCommission || "0"}%
                               </span>
+                              {canViewCampaign && (
+                                <span className="inline-flex items-center rounded-full border border-fuchsia-200 bg-fuchsia-50 px-3 py-1 text-xs font-medium text-fuchsia-700">
+                                  Contribute {structure.campaignContribution || "0"}%
+                                </span>
+                              )}
                               <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
                                 Direct {structure.directCommission || "0"}%
                               </span>
@@ -1457,6 +1631,20 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                               step="0.001"
                               className="w-full rounded-xl border border-blue-200 bg-white p-3 text-lg font-semibold text-slate-900 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
                             />
+                            {canViewCampaign && (
+                              <div className="mt-3">
+                                <label className="mb-1 block text-sm font-medium text-slate-700">Contribute to Campaign (%)</label>
+                                <input
+                                  type="number"
+                                  value={structure.campaignContribution}
+                                  onChange={(event) => handleTierCampaignContributionChange(structure.id, event.target.value)}
+                                  placeholder="e.g. 2"
+                                  step="0.001"
+                                  className="w-full rounded-xl border border-blue-200 bg-white p-3 text-sm font-medium text-slate-900 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                                />
+                                <p className="mt-1 text-xs text-slate-500">Campaign contribution is treated as additional company commission before auto split.</p>
+                              </div>
+                            )}
                             <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-600">
                               <div className="rounded-xl bg-white/80 px-3 py-2 shadow-sm">
                                 <span className="block text-[11px] uppercase tracking-wide text-slate-400">Company</span>
@@ -1483,7 +1671,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                           <div className="mb-4">
                             <h5 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Release Control</h5>
-                            <p className="mt-1 text-xs text-slate-400">Direct commission is released immediately. Holding commission is released manually.</p>
+                            <p className="mt-1 text-xs text-slate-400">Direct + Holding is automatically maintained to match (Total Commission - Campaign Contribution).</p>
                           </div>
                           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div>
@@ -1491,7 +1679,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                               <input
                                 type="number"
                                 value={structure.directCommission}
-                                onChange={(event) => handleCommissionStructureChange(structure.id, "directCommission", event.target.value)}
+                                onChange={(event) => handleDirectCommissionChange(structure.id, event.target.value)}
                                 placeholder="e.g. 1.5"
                                 step="0.001"
                                 className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:bg-white focus:ring-1 focus:ring-primary"
@@ -1502,7 +1690,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                               <input
                                 type="number"
                                 value={structure.holdingCommission}
-                                onChange={(event) => handleCommissionStructureChange(structure.id, "holdingCommission", event.target.value)}
+                                onChange={(event) => handleHoldingCommissionChange(structure.id, event.target.value)}
                                 placeholder="e.g. 0.5"
                                 step="0.001"
                                 className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:bg-white focus:ring-1 focus:ring-primary"
@@ -1560,6 +1748,31 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                                 step="0.001"
                                 className="w-full rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:bg-white focus:ring-1 focus:ring-primary"
                               />
+                            </div>
+                          </div>
+
+                          <div className="mt-5 rounded-xl border border-dashed border-emerald-200 bg-emerald-50/60 p-4">
+                            <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">Direct Commission Share Breakdown</h6>
+                            <p className="mt-1 text-xs text-emerald-700/80">
+                              Calculated from Direct Commission (%) using the current commission breakdown weights.
+                            </p>
+                            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm">
+                                <span className="block text-[11px] uppercase tracking-wide text-slate-400">Company Share</span>
+                                <span className="font-semibold text-slate-800">{formatCommissionPercentage(directShare.companyShare)}%</span>
+                              </div>
+                              <div className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm">
+                                <span className="block text-[11px] uppercase tracking-wide text-slate-400">Agent Share</span>
+                                <span className="font-semibold text-slate-800">{formatCommissionPercentage(directShare.agentShare)}%</span>
+                              </div>
+                              <div className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm">
+                                <span className="block text-[11px] uppercase tracking-wide text-slate-400">Pre Leader Share</span>
+                                <span className="font-semibold text-slate-800">{formatCommissionPercentage(directShare.preLeaderShare)}%</span>
+                              </div>
+                              <div className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm">
+                                <span className="block text-[11px] uppercase tracking-wide text-slate-400">Leader Share</span>
+                                <span className="font-semibold text-slate-800">{formatCommissionPercentage(directShare.leaderShare)}%</span>
+                              </div>
                             </div>
                           </div>
 
@@ -1784,6 +1997,12 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                             <div>
                               <p className="text-gray-400">Company</p>
                               <p className="mt-1 font-medium text-gray-800">{formatCommissionPercentage(structure.company_commission)}%</p>
+                            </div>
+                          )}
+                          {canManageProjects && canViewCampaign && (
+                            <div>
+                              <p className="text-gray-400">Campaign</p>
+                              <p className="mt-1 font-medium text-gray-800">{formatCommissionPercentage(structure.campaign_contribution ?? 0)}%</p>
                             </div>
                           )}
                           <div>
