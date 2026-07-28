@@ -274,6 +274,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
 
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const canManageProjects = role === "admin" || role === "super_admin";
+  const canManageMultipleStructures = role === "super_admin";
   const canViewCampaign = role === "super_admin";
   const canDeleteProjects = role === "super_admin";
   const canViewHiddenProjects = canManageProjects;
@@ -295,6 +296,45 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
         structure.id === structureId ? { ...structure, [field]: value } : structure
       ),
     }));
+  };
+
+  const handleAddCommissionStructure = () => {
+    if (!canManageMultipleStructures) {
+      return;
+    }
+
+    setFormData((prev) => {
+      const nextStructure = createEmptyCommissionStructure(prev.commissionStructures.length + 1);
+
+      return {
+        ...prev,
+        commissionStructures: [...prev.commissionStructures, nextStructure],
+        defaultCommissionStructureId: prev.defaultCommissionStructureId || nextStructure.id,
+      };
+    });
+  };
+
+  const handleRemoveCommissionStructure = (structureId: string) => {
+    if (!canManageMultipleStructures) {
+      return;
+    }
+
+    setFormData((prev) => {
+      if (prev.commissionStructures.length <= 1) {
+        return prev;
+      }
+
+      const nextStructures = prev.commissionStructures.filter((structure) => structure.id !== structureId);
+
+      return {
+        ...prev,
+        commissionStructures: nextStructures,
+        defaultCommissionStructureId:
+          prev.defaultCommissionStructureId === structureId
+            ? nextStructures[0]?.id ?? ""
+            : prev.defaultCommissionStructureId,
+      };
+    });
   };
 
   useEffect(() => {
@@ -617,7 +657,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
   };
 
   const mapRecordToForm = (project: ProjectRecord) => {
-    const commissionStructure = getProjectCommissionStructures(project)[0] ?? {
+    const fallbackStructure: CommissionStructure = {
       id: "default-tier",
       label: "Default Tier",
       min_units: null,
@@ -631,14 +671,42 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
       holding_commission: project.holding_commission,
     };
 
-    const totalCommissionValue = [
-      commissionStructure.company_commission,
-      commissionStructure.agent_commission,
-      commissionStructure.pre_leader_override,
-      commissionStructure.leader_override,
-    ]
-      .filter((value) => typeof value === "number")
-      .reduce((sum, value) => sum + (value ?? 0), 0);
+    const commissionStructures = getProjectCommissionStructures(project);
+    const normalizedStructures = (commissionStructures.length > 0 ? commissionStructures : [fallbackStructure]).map(
+      (structure, index) => {
+        const totalCommissionValue = [
+          structure.company_commission,
+          structure.agent_commission,
+          structure.pre_leader_override,
+          structure.leader_override,
+        ]
+          .filter((value) => typeof value === "number")
+          .reduce((sum, value) => sum + (value ?? 0), 0);
+
+        return {
+          id: structure.id || createTierId(),
+          label: structure.label ?? `Tier ${index + 1}`,
+          minUnits: structure.min_units?.toString() ?? "",
+          maxUnits: structure.max_units?.toString() ?? "",
+          totalCommission: formatEditableCommissionValue(totalCommissionValue),
+          campaignContribution: formatEditableCommissionValue(structure.campaign_contribution ?? 0),
+          companyCommission: formatEditableCommissionValue(structure.company_commission),
+          agentCommission: formatEditableCommissionValue(structure.agent_commission),
+          preLeaderOverride: formatEditableCommissionValue(structure.pre_leader_override),
+          leaderOverride: formatEditableCommissionValue(structure.leader_override),
+          directCommission: formatEditableCommissionValue(
+            structure.direct_commission ?? totalCommissionValue,
+          ),
+          holdingCommission: formatEditableCommissionValue(structure.holding_commission ?? 0),
+        };
+      }
+    );
+
+    const defaultCommissionStructureId =
+      project.default_commission_structure_id &&
+      normalizedStructures.some((structure) => structure.id === project.default_commission_structure_id)
+        ? project.default_commission_structure_id
+        : normalizedStructures[0]?.id ?? "";
 
     setFormData({
       projectName: project.project_name ?? "",
@@ -672,23 +740,8 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
       sizeMin: project.size_min?.toString() ?? "",
       sizeMax: project.size_max?.toString() ?? "",
       tenure: project.tenure ?? "Freehold",
-      commissionStructures: [{
-        id: "default-tier",
-        label: "Default Tier",
-        minUnits: "",
-        maxUnits: "",
-        totalCommission: formatEditableCommissionValue(totalCommissionValue),
-        campaignContribution: formatEditableCommissionValue(commissionStructure.campaign_contribution ?? 0),
-        companyCommission: formatEditableCommissionValue(commissionStructure.company_commission),
-        agentCommission: formatEditableCommissionValue(commissionStructure.agent_commission),
-        preLeaderOverride: formatEditableCommissionValue(commissionStructure.pre_leader_override),
-        leaderOverride: formatEditableCommissionValue(commissionStructure.leader_override),
-        directCommission: formatEditableCommissionValue(
-          commissionStructure.direct_commission ?? totalCommissionValue,
-        ),
-        holdingCommission: formatEditableCommissionValue(commissionStructure.holding_commission ?? 0),
-      }],
-      defaultCommissionStructureId: "default-tier",
+      commissionStructures: normalizedStructures,
+      defaultCommissionStructureId,
       launchDate: project.launch_date ?? "",
       completionDate: project.completion_date ?? "",
       status: project.status ?? "Coming Soon",
@@ -843,28 +896,62 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
       return;
     }
 
-    const singleStructure = formData.commissionStructures[0] ?? createEmptyCommissionStructure(1);
-    const normalizedCommissionStructures = [{
-      id: "default-tier",
-      label: "Default Tier",
-      min_units: null,
-      max_units: null,
-      campaign_contribution: toNumberOrNull(singleStructure.campaignContribution),
-      company_commission: toNumberOrNull(singleStructure.companyCommission),
-      agent_commission: toNumberOrNull(singleStructure.agentCommission),
-      pre_leader_override: toNumberOrNull(singleStructure.preLeaderOverride),
-      leader_override: toNumberOrNull(singleStructure.leaderOverride),
-      direct_commission: toNumberOrNull(singleStructure.directCommission),
-      holding_commission: toNumberOrNull(singleStructure.holdingCommission),
-    }];
+    const normalizedCommissionStructures = formData.commissionStructures.map((structure, index) => ({
+      id: structure.id || createTierId(),
+      label: structure.label.trim() || `Tier ${index + 1}`,
+      min_units: toIntOrNull(structure.minUnits),
+      max_units: toIntOrNull(structure.maxUnits),
+      campaign_contribution: toNumberOrNull(structure.campaignContribution),
+      company_commission: toNumberOrNull(structure.companyCommission),
+      agent_commission: toNumberOrNull(structure.agentCommission),
+      pre_leader_override: toNumberOrNull(structure.preLeaderOverride),
+      leader_override: toNumberOrNull(structure.leaderOverride),
+      direct_commission: toNumberOrNull(structure.directCommission),
+      holding_commission: toNumberOrNull(structure.holdingCommission),
+    }));
 
-    const primaryCommissionStructure = normalizedCommissionStructures[0];
+    const invalidTierRange = normalizedCommissionStructures.find(
+      (structure) =>
+        structure.min_units !== null &&
+        structure.max_units !== null &&
+        structure.min_units > structure.max_units
+    );
+
+    if (invalidTierRange) {
+      setError("Tier unit range is invalid. The minimum tier unit cannot be more than the maximum.");
+      return;
+    }
+
+    const hasValidCommission = normalizedCommissionStructures.every((structure) => {
+      return !(
+        structure.company_commission === null &&
+        structure.agent_commission === null &&
+        structure.pre_leader_override === null &&
+        structure.leader_override === null
+      );
+    });
+
+    if (!hasValidCommission) {
+      setError("Please enter at least one commission percentage for every tier.");
+      return;
+    }
+
+    const selectedDefaultStructureId =
+      formData.defaultCommissionStructureId &&
+      normalizedCommissionStructures.some((structure) => structure.id === formData.defaultCommissionStructureId)
+        ? formData.defaultCommissionStructureId
+        : normalizedCommissionStructures[0]?.id ?? null;
+
+    const primaryCommissionStructure =
+      normalizedCommissionStructures.find((structure) => structure.id === selectedDefaultStructureId) ??
+      normalizedCommissionStructures[0];
 
     if (
-      primaryCommissionStructure.company_commission === null &&
-      primaryCommissionStructure.agent_commission === null &&
-      primaryCommissionStructure.pre_leader_override === null &&
-      primaryCommissionStructure.leader_override === null
+      !primaryCommissionStructure ||
+      (primaryCommissionStructure.company_commission === null &&
+        primaryCommissionStructure.agent_commission === null &&
+        primaryCommissionStructure.pre_leader_override === null &&
+        primaryCommissionStructure.leader_override === null)
     ) {
       setError("Please enter at least one commission percentage.");
       return;
@@ -925,7 +1012,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
         direct_commission: primaryCommissionStructure.direct_commission,
         holding_commission: primaryCommissionStructure.holding_commission,
         commission_structures: normalizedCommissionStructures,
-        default_commission_structure_id: "default-tier",
+        default_commission_structure_id: selectedDefaultStructureId,
         launch_date: formData.launchDate || null,
         completion_date: formData.completionDate || null,
         status: formData.status,
@@ -1573,9 +1660,20 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
               </div>
 
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-100 pb-3 mb-4">Commission Structure</h3>
+                <div className="mb-4 flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h3 className="text-lg font-semibold text-gray-800">Commission Structure</h3>
+                  {canManageMultipleStructures && (
+                    <button
+                      type="button"
+                      onClick={handleAddCommissionStructure}
+                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Add Tier
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-4">
-                  {(formData.commissionStructures[0] ? [formData.commissionStructures[0]] : [createEmptyCommissionStructure(1)]).map((structure) => (
+                  {(canManageMultipleStructures ? formData.commissionStructures : formData.commissionStructures.slice(0, 1)).map((structure, index) => (
                     <div
                       key={structure.id}
                       className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50/80 to-blue-50/40 shadow-sm transition hover:border-slate-300 hover:shadow-md"
@@ -1591,8 +1689,13 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                           <div className="space-y-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <h4 className="text-xl font-semibold tracking-tight text-slate-900">
-                                Default Commission
+                                {structure.label || `Tier ${index + 1}`}
                               </h4>
+                              {formData.defaultCommissionStructureId === structure.id && (
+                                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                                  Used For New Cases
+                                </span>
+                              )}
                             </div>
                             <p className="text-sm text-slate-500">Set total commission, direct release, and holding amount.</p>
                             <div className="flex flex-wrap gap-2 pt-1">
@@ -1612,11 +1715,74 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
                               </span>
                             </div>
                           </div>
-                          <div />
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            {canManageMultipleStructures && (
+                              <label className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                                <input
+                                  type="radio"
+                                  name="defaultCommissionStructureId"
+                                  checked={formData.defaultCommissionStructureId === structure.id}
+                                  onChange={() =>
+                                    setFormData((prev) => ({
+                                      ...prev,
+                                      defaultCommissionStructureId: structure.id,
+                                    }))
+                                  }
+                                  className="h-3.5 w-3.5"
+                                />
+                                Use for New Cases
+                              </label>
+                            )}
+                            {canManageMultipleStructures && formData.commissionStructures.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCommissionStructure(structure.id)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Remove Tier
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       <div className="space-y-5 p-5">
+                        {canManageMultipleStructures && (
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <div>
+                              <label className="mb-1 block text-sm font-medium text-slate-700">Tier Label</label>
+                              <input
+                                type="text"
+                                value={structure.label}
+                                onChange={(event) => handleCommissionStructureChange(structure.id, "label", event.target.value)}
+                                placeholder={`Tier ${index + 1}`}
+                                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-sm font-medium text-slate-700">Min Units</label>
+                              <input
+                                type="number"
+                                value={structure.minUnits}
+                                onChange={(event) => handleCommissionStructureChange(structure.id, "minUnits", event.target.value)}
+                                placeholder="e.g. 1"
+                                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-sm font-medium text-slate-700">Max Units</label>
+                              <input
+                                type="number"
+                                value={structure.maxUnits}
+                                onChange={(event) => handleCommissionStructureChange(structure.id, "maxUnits", event.target.value)}
+                                placeholder="e.g. 20"
+                                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                              />
+                            </div>
+                          </div>
+                        )}
+
                         <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-sky-50 p-4 shadow-sm">
                             <div className="mb-4">
                               <h5 className="text-sm font-semibold uppercase tracking-[0.16em] text-blue-700">Auto Split</h5>
