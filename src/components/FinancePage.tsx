@@ -859,29 +859,14 @@ export function FinancePage({ userId, role }: FinancePageProps) {
 
   const totalCashForCampaign = useMemo(
     () =>
-      entries.reduce((sum, entry) => {
-        const transactedAt = getLocalDateValueFromTimestamp(entry.transacted_at);
-        const normalizedDescription = (entry.description ?? "").toLowerCase();
-        const normalizedReference = (entry.reference_label ?? "").toLowerCase();
-        const normalizedReferenceDetail = (entry.reference_detail ?? "").toLowerCase();
-        const isCampaignEntry =
-          normalizedDescription.includes("campaign") ||
-          normalizedReference.includes("campaign") ||
-          normalizedReferenceDetail.includes("campaign");
+      filteredCaseRows.reduce((sum, record) => {
+        const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+        const commissionStructure = getCaseCommissionStructure(record, project);
+        const campaignPercentage = commissionStructure?.campaign_contribution ?? 0;
 
-        if (
-          entry.entry_type !== "cash_out" ||
-          !isCampaignEntry ||
-          !transactedAt ||
-          transactedAt < fromDate ||
-          transactedAt > toDate
-        ) {
-          return sum;
-        }
-
-        return sum + Number(entry.amount ?? 0);
+        return sum + (Number(record.nett_price ?? 0) * campaignPercentage) / 100;
       }, 0),
-    [entries, fromDate, toDate]
+    [filteredCaseRows, projectMap]
   );
 
   const handleAddEntry = async (event: React.FormEvent<HTMLFormElement>) => {

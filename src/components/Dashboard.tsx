@@ -173,6 +173,9 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
     rank === "agent" ||
     rank === "pre_leader" ||
     rank === "leader";
+  const normalizedRank = rank?.trim().toLowerCase().replace(/\s+/g, "_") ?? null;
+  const shouldHideTeamConvertedOverview =
+    normalizedRank === "agent" || normalizedRank === "pre_leader" || normalizedRank === "leader";
   const canViewSummaryMetrics = isSuperAdmin || isAdmin;
   const canViewMemberMetrics = Boolean(userId && isMemberAccount);
   const canLoadMetricData = canViewSummaryMetrics || canViewMemberMetrics;
@@ -1324,27 +1327,14 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
   const totalCashForCampaign = useMemo(
     () =>
-      entries.reduce((sum, entry) => {
-        const transactedAt = getLocalDateValueFromTimestamp(entry.transacted_at);
-        const normalizedDescription = (entry.description ?? "").toLowerCase();
-        const normalizedReferenceDetail = (entry.reference_detail ?? "").toLowerCase();
-        const isCampaignEntry =
-          normalizedDescription.includes("campaign") ||
-          normalizedReferenceDetail.includes("campaign");
+      filteredCaseRows.reduce((sum, record) => {
+        const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+        const commissionStructure = getCaseCommissionStructure(record, project);
+        const campaignPercentage = commissionStructure?.campaign_contribution ?? 0;
 
-        if (
-          entry.entry_type !== "cash_out" ||
-          !isCampaignEntry ||
-          !transactedAt ||
-          transactedAt < defaultFromDate ||
-          transactedAt > defaultToDate
-        ) {
-          return sum;
-        }
-
-        return sum + Number(entry.amount ?? 0);
+        return sum + (Number(record.nett_price ?? 0) * campaignPercentage) / 100;
       }, 0),
-    [defaultFromDate, defaultToDate, entries]
+    [filteredCaseRows, projectMap]
   );
 
   const totalCashOut = totalPaidOutToAgent + totalPaidOutNonAgent;
@@ -1563,10 +1553,12 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
               <p className="text-sm font-medium text-gray-500 mb-2">Team Total Sales of the Month</p>
               <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlySalesForMembers)}</p>
             </div>
-            <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-              <p className="text-sm font-medium text-gray-500 mb-2">Team Total Converted of the Month</p>
-              <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyConvertedCommission)}</p>
-            </div>
+            {!shouldHideTeamConvertedOverview && (
+              <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+                <p className="text-sm font-medium text-gray-500 mb-2">Team Total Converted of the Month</p>
+                <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyConvertedCommission)}</p>
+              </div>
+            )}
             <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
               <p className="text-sm font-medium text-gray-500 mb-2">Number of Downline</p>
               <p className="text-2xl font-bold text-gray-900">{downlineIds.length}</p>
