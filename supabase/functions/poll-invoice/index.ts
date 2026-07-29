@@ -11,7 +11,7 @@ const corsHeaders = {
 
 async function pollForStatus(uuid: string, token: string): Promise<any> {
   const url = `${LHDN_API_URL}/api/v1.0/documents/${uuid}/details`;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 15; i++) {
     const res = await fetch(url, {
        headers: { "Authorization": `Bearer ${token}` }
     });
@@ -22,10 +22,10 @@ async function pollForStatus(uuid: string, token: string): Promise<any> {
           return data;
        }
     }
-    // wait 2 seconds
-    await new Promise(r => setTimeout(r, 2000));
+    // wait 3 seconds
+    await new Promise(r => setTimeout(r, 3000));
   }
-  throw new Error("Polling timeout - document not processed yet.");
+  throw new Error("Polling timeout - LHDN is taking longer than usual to process this document. Please try fetching the status later.");
 }
 
 serve(async (req) => {
@@ -39,9 +39,11 @@ serve(async (req) => {
     const token = await getLhdnAccessToken();
     const documentDetails = await pollForStatus(documentUuid, token);
 
-    const validationUrl = documentDetails.validationUrl; 
+    const uuid = documentDetails.uuid;
+    const longId = documentDetails.longId;
     let base64Image = null;
-    if (validationUrl) {
+    if (uuid && longId && documentDetails.status === "Valid") {
+      const validationUrl = `https://myinvois.hasil.gov.my/${uuid}/share/${longId}`;
       base64Image = await qrcode(validationUrl);
     }
 
