@@ -375,6 +375,17 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
       if (pollError) throw new Error(pollError.message);
       if (!pollData.success) throw new Error(pollData.error || "Failed to retrieve LHDN status");
 
+      setRecords((prev) =>
+        prev.map((item) =>
+          item.id === record.id
+            ? {
+                ...item,
+                lhdn_status: "Valid",
+              }
+            : item
+        )
+      );
+
       setSuccess("Successfully submitted to LHDN MyInvois and retrieved validation details.");
       await loadRecords(); // Refresh the list to show the new QR code and Status
     } catch (err: any) {
@@ -672,6 +683,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                 <th className="px-4 py-2">Bill To</th>
                 <th className="px-4 py-2">Items</th>
                 <th className="px-4 py-2">Total Include SST (RM)</th>
+                <th className="px-4 py-2">LHDN Status</th>
                 <th className="px-4 py-2 text-right">Action</th>
               </tr>
             </thead>
@@ -687,6 +699,19 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                     <td className="px-4 py-3 text-gray-700">{record.bill_to}</td>
                     <td className="px-4 py-3 text-gray-700">{lineItems.length}</td>
                     <td className="px-4 py-3 text-gray-700">RM {formatAmount(totalInclude)}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                          record.lhdn_status === "Valid"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : record.lhdn_status === "Invalid"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {record.lhdn_status || "Pending"}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -730,7 +755,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
 
               {records.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-gray-500">
+                  <td colSpan={7} className="py-6 text-center text-gray-500">
                     No e-invoice rows found.
                   </td>
                 </tr>
