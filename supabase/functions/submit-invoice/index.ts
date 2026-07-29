@@ -9,7 +9,7 @@ const corsHeaders = {
 };
 
 async function submitWithRetry(payload: any, token: string, retries = 3, delay = 1000): Promise<any> {
-  const url = `${LHDN_API_URL}/api/v1.0/documents/submissions`;
+  const url = `${LHDN_API_URL}/api/v1.0/documentsubmissions`;
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     const response = await fetch(url, {
@@ -53,13 +53,27 @@ serve(async (req) => {
     
     // 1. Transform to UBL 2.1
     const ublPayload = mapToUBL21(invoiceData);
+    const docString = JSON.stringify(ublPayload);
     
+    // Create SHA256 Hash
+    const encoder = new TextEncoder();
+    const data = encoder.encode(docString);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const documentHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    // Create Base64 Encoded Document
+    const base64Document = btoa(docString);
+
     // LHDN requires a wrapping document array
     const submissionPayload = {
        "documents": [
           {
              "format": "JSON",
-             "document": ublPayload
+             "documentHash": documentHash,
+             "document": base64Document,
+             "documentVersion": "1.0",
+             "codeNumber": invoiceData.invoice_number || "INV-0001"
           }
        ]
     };
@@ -77,7 +91,7 @@ serve(async (req) => {
   } catch (error: any) {
     return new Response(JSON.stringify({ success: false, error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 200,
     });
   }
 });

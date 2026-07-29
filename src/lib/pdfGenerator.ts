@@ -14,6 +14,8 @@ export type EInvoiceRecord = {
   invoice_number: string;
   invoice_date: string;
   bill_to: string;
+  lhdn_uuid?: string | null;
+  lhdn_status?: string | null;
   tax_rate: number;
   line_items: EInvoiceLineItem[] | null;
   created_at: string;

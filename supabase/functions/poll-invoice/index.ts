@@ -39,12 +39,11 @@ serve(async (req) => {
     const token = await getLhdnAccessToken();
     const documentDetails = await pollForStatus(documentUuid, token);
 
-    if (documentDetails.status !== "Valid") {
-        throw new Error(`Document status is ${documentDetails.status}`);
-    }
-
     const validationUrl = documentDetails.validationUrl; 
-    const base64Image = await qrcode(validationUrl);
+    let base64Image = null;
+    if (validationUrl) {
+      base64Image = await qrcode(validationUrl);
+    }
 
     // Save back to Supabase e_invoices table
     const supabaseClient = createClient(
@@ -54,10 +53,28 @@ serve(async (req) => {
 
     const { error } = await supabaseClient
       .from('e_invoices')
-      .update({ qr_code: base64Image })
+      .update({ 
+         qr_code: base64Image,
+         lhdn_uuid: documentUuid,
+         lhdn_status: documentDetails.status
+      })
       .eq('id', recordId);
 
     if (error) throw error;
+
+    if (documentDetails.status !== "Valid") {
+        let errorDetails = "";
+        if (documentDetails.validationResults?.validationSteps) {
+            const errors = documentDetails.validationResults.validationSteps
+                .filter((s: any) => s.status === "Invalid" && s.error)
+                .map((s: any) => s.error.error || s.error.message || s.error.code || JSON.stringify(s.error))
+                .join(", ");
+            if (errors) {
+                errorDetails = ` - Reasons: ${errors}`;
+            }
+        }
+        throw new Error(`Document status is ${documentDetails.status}${errorDetails}`);
+    }
 
     return new Response(JSON.stringify({ success: true, status: documentDetails.status, qr_code: base64Image }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -66,7 +83,7 @@ serve(async (req) => {
   } catch (error: any) {
     return new Response(JSON.stringify({ success: false, error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 200,
     });
   }
 });

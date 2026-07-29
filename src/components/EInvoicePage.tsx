@@ -16,6 +16,8 @@ export type EInvoiceRecord = {
   invoice_date: string;
   bill_to: string;
   qr_code: string | null;
+  lhdn_uuid?: string | null;
+  lhdn_status?: string | null;
   tax_rate: number;
   line_items: EInvoiceLineItem[] | null;
   received_amount?: number | null;
@@ -137,6 +139,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isReceiving, setIsReceiving] = useState(false);
+  const [isSubmittingLhdn, setIsSubmittingLhdn] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
@@ -335,6 +338,49 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
       setError(null);
     } catch (err: any) {
       setError("Failed to generate PDF: " + err.message);
+    }
+  };
+
+  const handleSubmitToLhdn = async (record: EInvoiceRecord) => {
+    setError(null);
+    setSuccess(null);
+    setIsSubmittingLhdn(record.id);
+
+    try {
+      // 1. Submit Invoice
+      const { data: submitData, error: submitError } = await supabase.functions.invoke("submit-invoice", {
+        body: { invoiceData: record },
+      });
+
+      if (submitError) throw new Error(submitError.message);
+      if (!submitData.success) throw new Error(submitData.error || "Failed to submit to LHDN");
+
+      // NEW: Explicitly catch and display exact LHDN backend validation rejection reasons
+      if (submitData.result?.rejectedDocuments?.length > 0) {
+        const rejectReason =
+          submitData.result.rejectedDocuments[0].error?.details?.[0]?.message ||
+          submitData.result.rejectedDocuments[0].error?.message ||
+          "Validation Error";
+        throw new Error(`LHDN Rejected: ${rejectReason}`);
+      }
+
+      const uuid = submitData.result?.acceptedDocuments?.[0]?.uuid;
+      if (!uuid) throw new Error(`No UUID returned from LHDN. Result: ${JSON.stringify(submitData.result)}`);
+
+      // 2. Poll for Status and get QR Code
+      const { data: pollData, error: pollError } = await supabase.functions.invoke("poll-invoice", {
+        body: { documentUuid: uuid, recordId: record.id },
+      });
+
+      if (pollError) throw new Error(pollError.message);
+      if (!pollData.success) throw new Error(pollData.error || "Failed to retrieve LHDN status");
+
+      setSuccess("Successfully submitted to LHDN MyInvois and retrieved validation details.");
+      await loadRecords(); // Refresh the list to show the new QR code and Status
+    } catch (err: any) {
+      setError(`LHDN Submission Error: ${err.message}`);
+    } finally {
+      setIsSubmittingLhdn(null);
     }
   };
 
@@ -667,6 +713,14 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                         >
                           <Sparkles className="h-3.5 w-3.5" />
                           Generate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSubmitToLhdn(record)}
+                          disabled={isSubmittingLhdn === record.id}
+                          className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:text-amber-800 disabled:opacity-60"
+                        >
+                          {isSubmittingLhdn === record.id ? "Submitting..." : "Submit LHDN"}
                         </button>
                       </div>
                     </td>
