@@ -860,6 +860,12 @@ export function FinancePage({ userId, role }: FinancePageProps) {
   const totalCashForCampaign = useMemo(
     () =>
       filteredCaseRows.reduce((sum, record) => {
+        const status = normalizeCaseStatus(record.status).toLowerCase();
+
+        if (status === "pending" || status === "reject" || status === "cancel") {
+          return sum;
+        }
+
         const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
         const commissionStructure = getCaseCommissionStructure(record, project);
         const campaignPercentage = commissionStructure?.campaign_contribution ?? 0;

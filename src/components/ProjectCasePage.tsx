@@ -62,6 +62,8 @@ const toComparableDate = (value: string | null) => {
   return toDateInputValue(parsedDate);
 };
 
+const normalizeCaseStatus = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+
 const formatDate = (value: string | null) => {
   if (!value) {
     return "-";
@@ -243,6 +245,12 @@ export function ProjectCasePage() {
 
   const totalCampaignComm = useMemo(() => {
     return visibleCases.reduce((sum, record) => {
+      const status = normalizeCaseStatus(record.status);
+
+      if (status === "pending" || status === "reject" || status === "cancel") {
+        return sum;
+      }
+
       const project = record.project_id ? projectById.get(record.project_id) ?? null : null;
       const commissionStructure = getCaseCommissionStructure(record, project);
       const campaignPercentage = commissionStructure?.campaign_contribution ?? 0;
