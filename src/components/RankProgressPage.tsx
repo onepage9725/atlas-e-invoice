@@ -740,11 +740,9 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
             const avatarImage = getAvatarImageProps(profile);
 
             return (
-              <button
+              <div
                 key={profile.id}
-                type="button"
-                onClick={() => setSelectedProfileId(profile.id)}
-                className="rounded-xl border border-gray-100 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="rounded-xl border border-gray-100 bg-white p-5 text-left shadow-sm"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-center gap-3 min-w-0">
@@ -801,9 +799,8 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
                       </div>
                     );
                   })}
-                  <p className="pt-1 text-xs font-medium text-primary">Click to view related cases</p>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
