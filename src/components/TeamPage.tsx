@@ -481,6 +481,9 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
 
   const currentProfile = profileMap.get(userId) ?? null;
   const canViewTeam = role === "agent" || role === "leader" || rank === "agent" || rank === "pre_leader" || rank === "leader";
+  const normalizedRank = rank?.trim().toLowerCase().replace(/\s+/g, "_") ?? null;
+  const shouldHideConvertedOverviewCards =
+    normalizedRank === "agent" || normalizedRank === "pre_leader" || normalizedRank === "leader";
 
   const downlineIds = useMemo(() => {
     if (!currentProfile || !canViewTeam) {
@@ -1635,21 +1638,25 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
           <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalDownlineSales)}</p>
           <p className="mt-2 text-xs text-gray-500">Team commission for the selected month, including your own and downline cases whether completed or not.</p>
         </div>
-        <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
-          <p className="mb-2 text-sm font-medium text-gray-500">Total Converted</p>
-          <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalDownlineConverted)}</p>
-          <p className="mt-2 text-xs text-gray-500">Completed team commission for the selected month, including your own cases.</p>
-        </div>
+        {!shouldHideConvertedOverviewCards && (
+          <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <p className="mb-2 text-sm font-medium text-gray-500">Total Converted</p>
+            <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalDownlineConverted)}</p>
+            <p className="mt-2 text-xs text-gray-500">Completed team commission for the selected month, including your own cases.</p>
+          </div>
+        )}
         <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
           <p className="mb-2 text-sm font-medium text-gray-500">Team GDV of the Month</p>
           <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyGDV)}</p>
           <p className="mt-2 text-xs text-gray-500">Team personal GDV for the selected month, using the split share for involved salespeople.</p>
         </div>
-        <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
-          <p className="mb-2 text-sm font-medium text-gray-500">Team Converted of the Month</p>
-          <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyConverted)}</p>
-          <p className="mt-2 text-xs text-gray-500">Team personal completed sales total for the selected month, using the split share for involved salespeople.</p>
-        </div>
+        {!shouldHideConvertedOverviewCards && (
+          <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <p className="mb-2 text-sm font-medium text-gray-500">Team Converted of the Month</p>
+            <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyConverted)}</p>
+            <p className="mt-2 text-xs text-gray-500">Team personal completed sales total for the selected month, using the split share for involved salespeople.</p>
+          </div>
+        )}
       </div>
 
       <div className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">

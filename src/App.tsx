@@ -38,6 +38,16 @@ const isSessionError = (message: string | undefined) => {
   );
 };
 
+const isPasswordRecoveryRequest = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return searchParams.get("reset_password") === "true" || hashParams.get("type") === "recovery";
+};
+
 function App() {
   const [activeView, setActiveView] = useState("Dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -52,6 +62,7 @@ function App() {
   const [profileAvatarZoom, setProfileAvatarZoom] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(isPasswordRecoveryRequest);
 
   const clearSessionState = () => {
     setSessionEmail(null);
@@ -74,6 +85,7 @@ function App() {
     }
 
     const loadSession = async () => {
+      setIsPasswordRecovery(isPasswordRecoveryRequest());
       const { data, error } = await supabase.auth.getSession();
 
       if (error && isSessionError(error.message)) {
@@ -107,7 +119,11 @@ function App() {
 
     loadSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
+      }
+
       if (!session) {
         clearSessionState();
         return;
@@ -272,6 +288,10 @@ function App() {
         Loading...
       </div>
     );
+  }
+
+  if (isPasswordRecovery) {
+    return <AuthPage isPasswordRecovery onPasswordResetComplete={() => setIsPasswordRecovery(false)} />;
   }
 
   if (!sessionEmail) {
