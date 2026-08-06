@@ -698,6 +698,8 @@ export function UsersForm() {
       password,
       role,
       name: name.trim(),
+      forcePasswordChange: true,
+      mustChangePassword: true,
     };
 
     if (shouldRequireRank) {

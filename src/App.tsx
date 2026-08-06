@@ -48,6 +48,22 @@ const isPasswordRecoveryRequest = () => {
   return searchParams.get("reset_password") === "true" || hashParams.get("type") === "recovery";
 };
 
+const PASSWORD_CHANGE_METADATA_KEYS = [
+  "temporary_password",
+  "must_change_password",
+  "require_password_change",
+  "force_password_change",
+] as const;
+
+const isFirstLoginPasswordChangeRequired = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== "object") {
+    return false;
+  }
+
+  const metadataRecord = metadata as Record<string, unknown>;
+  return PASSWORD_CHANGE_METADATA_KEYS.some((key) => metadataRecord[key] === true);
+};
+
 function App() {
   const [activeView, setActiveView] = useState("Dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -63,6 +79,11 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(isPasswordRecoveryRequest);
+  const [isFirstLoginPasswordChangeOpen, setIsFirstLoginPasswordChangeOpen] = useState(false);
+  const [firstLoginNewPassword, setFirstLoginNewPassword] = useState("");
+  const [firstLoginConfirmPassword, setFirstLoginConfirmPassword] = useState("");
+  const [firstLoginPasswordError, setFirstLoginPasswordError] = useState<string | null>(null);
+  const [isFirstLoginPasswordSubmitting, setIsFirstLoginPasswordSubmitting] = useState(false);
 
   const clearSessionState = () => {
     setSessionEmail(null);
@@ -74,6 +95,11 @@ function App() {
     setProfileAvatarX(null);
     setProfileAvatarY(null);
     setProfileAvatarZoom(null);
+    setIsFirstLoginPasswordChangeOpen(false);
+    setFirstLoginNewPassword("");
+    setFirstLoginConfirmPassword("");
+    setFirstLoginPasswordError(null);
+    setIsFirstLoginPasswordSubmitting(false);
     setActiveView("Dashboard");
   };
 
@@ -114,6 +140,7 @@ function App() {
 
       setSessionEmail(nextSession.user.email ?? null);
       setSessionUserId(nextSession.user.id ?? null);
+      setIsFirstLoginPasswordChangeOpen(isFirstLoginPasswordChangeRequired(nextSession.user.user_metadata));
       setIsLoading(false);
     };
 
@@ -131,6 +158,7 @@ function App() {
 
       setSessionEmail(session.user.email ?? null);
       setSessionUserId(session.user.id ?? null);
+      setIsFirstLoginPasswordChangeOpen(isFirstLoginPasswordChangeRequired(session.user.user_metadata));
     });
 
     return () => {
@@ -228,6 +256,57 @@ function App() {
     setProfileAvatarX(avatarX);
     setProfileAvatarY(avatarY);
     setProfileAvatarZoom(avatarZoom);
+  };
+
+  const handleFirstLoginPasswordChange = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setFirstLoginPasswordError(null);
+
+    if (firstLoginNewPassword.length < 6) {
+      setFirstLoginPasswordError("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (firstLoginNewPassword !== firstLoginConfirmPassword) {
+      setFirstLoginPasswordError("Passwords do not match.");
+      return;
+    }
+
+    setIsFirstLoginPasswordSubmitting(true);
+
+    const { data: userResult, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userResult.user) {
+      setFirstLoginPasswordError(userError?.message ?? "Unable to load account details.");
+      setIsFirstLoginPasswordSubmitting(false);
+      return;
+    }
+
+    const currentMetadata = (userResult.user.user_metadata ?? {}) as Record<string, unknown>;
+    const nextMetadata: Record<string, unknown> = {
+      ...currentMetadata,
+      temporary_password: false,
+      must_change_password: false,
+      require_password_change: false,
+      force_password_change: false,
+    };
+
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: firstLoginNewPassword,
+      data: nextMetadata,
+    });
+
+    if (updateError) {
+      setFirstLoginPasswordError(updateError.message);
+      setIsFirstLoginPasswordSubmitting(false);
+      return;
+    }
+
+    setIsFirstLoginPasswordChangeOpen(false);
+    setFirstLoginNewPassword("");
+    setFirstLoginConfirmPassword("");
+    setFirstLoginPasswordError(null);
+    setIsFirstLoginPasswordSubmitting(false);
   };
 
   const normalizedProfileRole = normalizeAccessValue(profileRole);
@@ -569,6 +648,57 @@ function App() {
           </div>
         </div>
       </footer>
+
+      {isFirstLoginPasswordChangeOpen ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
+            <h2 className="text-xl font-semibold text-gray-900">Change your temporary password</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              For security, you must set your own password before continuing.
+            </p>
+
+            <form onSubmit={handleFirstLoginPasswordChange} className="mt-5 space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">New password</label>
+                <input
+                  type="password"
+                  value={firstLoginNewPassword}
+                  onChange={(event) => setFirstLoginNewPassword(event.target.value)}
+                  placeholder="Minimum 6 characters"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Confirm password</label>
+                <input
+                  type="password"
+                  value={firstLoginConfirmPassword}
+                  onChange={(event) => setFirstLoginConfirmPassword(event.target.value)}
+                  placeholder="Re-enter your password"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  required
+                />
+              </div>
+
+              {firstLoginPasswordError ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {firstLoginPasswordError}
+                </div>
+              ) : null}
+
+              <button
+                type="submit"
+                disabled={isFirstLoginPasswordSubmitting}
+                className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isFirstLoginPasswordSubmitting ? "Updating..." : "Update password"}
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
