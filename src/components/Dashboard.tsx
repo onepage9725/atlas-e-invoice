@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { KPICard } from "./KPICard";
-import { PaymentBehaviorChart } from "./PaymentBehaviorChart";
 import { supabase } from "../lib/supabaseClient";
 import {
   getCaseCommissionStructure,
@@ -1345,47 +1344,6 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
   const totalCashOut = totalPaidOutToAgent + totalPaidOutNonAgent;
 
-  const monthlyChartData = useMemo(() => {
-    const months = Array.from({ length: 12 }, (_, index) => {
-      const date = new Date(today.getFullYear(), index, 1);
-      return {
-        month: date.toLocaleString("en-MY", { month: "short" }),
-        monthValue: `${date.getFullYear()}-${`${index + 1}`.padStart(2, "0")}`,
-        totalGdv: 0,
-        totalNettSales: 0,
-        totalSales: 0,
-        totalConverted: 0,
-        totalCases: 0,
-      };
-    });
-
-    const rowsByMonth = new Map(months.map((row) => [row.monthValue, row]));
-
-    cases.forEach((record) => {
-      const createdAt = record.created_at ? new Date(record.created_at) : null;
-
-      if (!createdAt || Number.isNaN(createdAt.getTime()) || createdAt.getFullYear() !== today.getFullYear()) {
-        return;
-      }
-
-      const monthValue = `${createdAt.getFullYear()}-${`${createdAt.getMonth() + 1}`.padStart(2, "0")}`;
-      const chartRow = rowsByMonth.get(monthValue);
-
-      if (!chartRow) {
-        return;
-      }
-
-      const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
-      chartRow.totalGdv += record.spa_price ?? 0;
-      chartRow.totalNettSales += record.nett_price ?? 0;
-      chartRow.totalSales += getCaseCommissionAmountForProfiles(record, project, profiles, memberProfileIds);
-      chartRow.totalConverted += getCompletedCommissionAmountForProfiles(payoutMap.get(record.id) ?? [], memberProfileIds);
-      chartRow.totalCases += 1;
-    });
-
-    return months;
-  }, [cases, memberProfileIds, payoutMap, profiles, projectMap, today]);
-
   return (
     <div className="space-y-6 px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
       <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
@@ -1581,14 +1539,6 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
         </div>
       )}
 
-      {canViewSummaryMetrics && (
-        <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">Summary Trend</h3>
-          </div>
-          <PaymentBehaviorChart data={monthlyChartData} />
-        </div>
-      )}
       {selectedEvent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="relative w-full max-w-5xl">

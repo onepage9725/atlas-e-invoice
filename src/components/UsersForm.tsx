@@ -72,7 +72,7 @@ export function UsersForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<(typeof roleOptions)[number]>("admin");
+  const [role, setRole] = useState<(typeof roleOptions)[number]>("agent");
   const [rank, setRank] = useState<(typeof memberRankOptions)[number]>("agent");
   const [recruitById, setRecruitById] = useState("");
   const [personalPoints, setPersonalPoints] = useState("");
@@ -773,8 +773,8 @@ export function UsersForm() {
     setName("");
     setEmail("");
     setPassword("");
-    setRole("admin");
-    setRank(getDefaultMemberRankForRole("admin"));
+    setRole("agent");
+    setRank(getDefaultMemberRankForRole("agent"));
     setRecruitById("");
     setPersonalPoints("");
     setGroupPoints("");
