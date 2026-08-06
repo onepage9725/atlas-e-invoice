@@ -85,6 +85,35 @@ function App() {
   const [firstLoginPasswordError, setFirstLoginPasswordError] = useState<string | null>(null);
   const [isFirstLoginPasswordSubmitting, setIsFirstLoginPasswordSubmitting] = useState(false);
 
+  useEffect(() => {
+    const blockContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+
+    const blockInspectShortcuts = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const isInspectShortcut =
+        event.key === "F12" ||
+        ((event.ctrlKey || event.metaKey) && event.shiftKey && ["i", "j", "c"].includes(key)) ||
+        ((event.ctrlKey || event.metaKey) && key === "u");
+
+      if (!isInspectShortcut) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener("contextmenu", blockContextMenu);
+    document.addEventListener("keydown", blockInspectShortcuts);
+
+    return () => {
+      document.removeEventListener("contextmenu", blockContextMenu);
+      document.removeEventListener("keydown", blockInspectShortcuts);
+    };
+  }, []);
+
   const clearSessionState = () => {
     setSessionEmail(null);
     setSessionUserId(null);
