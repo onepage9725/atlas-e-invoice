@@ -136,7 +136,6 @@ type DisplaySalesCaseRow = {
   displayStatus: string;
   displayCommission: number | null;
   topUpLabel: string | null;
-  rowTypeLabel: string;
 };
 
 const MONTH_OPTIONS = [
@@ -739,12 +738,6 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
       const topUpLabel = topUpPayout
         ? `${getShortCommissionStructureLabel(topUpPayout.source_commission_structure_label) || topUpPayout.source_commission_structure_id || "Previous Tier"} -> ${getShortCommissionStructureLabel(topUpPayout.target_commission_structure_label) || topUpPayout.target_commission_structure_id || "New Tier"}`
         : null;
-      const rowTypeLabel = row.rowType === "top_up"
-        ? "Top-up"
-        : row.rowType === "holding"
-          ? "Holding Comm"
-          : "Direct Comm";
-
       return {
         row,
         projectName,
@@ -762,7 +755,6 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
         displayStatus,
         displayCommission,
         topUpLabel,
-        rowTypeLabel,
       };
     });
   }, [payoutMap, profileMap, projectMap, salesCaseRows, userId]);
@@ -1141,7 +1133,6 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                 <th className="px-6 py-2">Nett Price (RM)</th>
                 <th className="px-6 py-2">Created By</th>
                 <th className="px-6 py-2">Booking Form</th>
-                <th className="px-6 py-2">Row Type</th>
                 <th className="px-6 py-2">Status</th>
                 <th className="px-6 py-2">Commission</th>
                 <th className="px-6 py-2 text-right">Actions</th>
@@ -1149,7 +1140,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
             </thead>
             <tbody>
               {filteredSalesCaseRows.map((item) => {
-                const { row, record, projectName, topUpPayout, isCreator, isDeleteRequested, creatorLabel, createdAt, bookingDate, isLocked, viewerPayout, displayStatus, displayCommission, topUpLabel, rowTypeLabel } = {
+                const { row, record, projectName, topUpPayout, isCreator, isDeleteRequested, creatorLabel, createdAt, bookingDate, isLocked, viewerPayout, displayStatus, displayCommission, topUpLabel } = {
                   row: item.row,
                   record: item.row.record,
                   projectName: item.projectName,
@@ -1164,7 +1155,6 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                   displayStatus: item.displayStatus,
                   displayCommission: item.displayCommission,
                   topUpLabel: item.topUpLabel,
-                  rowTypeLabel: item.rowTypeLabel,
                 };
                 const isPersonallyRelatedCase =
                   row.rowType === "direct" &&
@@ -1203,7 +1193,6 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                         "-"
                       )}
                     </td>
-                    <td className="px-6 py-3 text-gray-600">{rowTypeLabel}</td>
                     <td className="px-6 py-3 text-gray-600">
                       <span
                         className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getCaseStatusClasses(displayStatus)}`}
@@ -1276,7 +1265,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
               })}
               {filteredSalesCaseRows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="py-6 text-center text-gray-500">
+                  <td colSpan={11} className="py-6 text-center text-gray-500">
                     No cases found.
                   </td>
                 </tr>
