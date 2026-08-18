@@ -2,6 +2,9 @@ alter table public.sales_cases
   add column if not exists booking_date date default current_date,
   add column if not exists customer_contact_number text,
   add column if not exists customer_address text,
+  add column if not exists customer_details jsonb,
+  add column if not exists customer_ic_url text,
+  add column if not exists booking_receipt_url text,
   add column if not exists emergency_contact_name text,
   add column if not exists emergency_contact_relationship text,
   add column if not exists emergency_contact_ic_passport text,
@@ -329,6 +332,7 @@ alter table public.finance_entries
 
 alter table public.profiles
   add column if not exists is_active boolean not null default true,
+  add column if not exists ic_no text,
   add column if not exists personal_points numeric not null default 0,
   add column if not exists group_points numeric not null default 0;
 
@@ -780,6 +784,8 @@ returns table (
   race text,
   buyer_type text,
   booking_form_url text,
+  customer_ic_url text,
+  booking_receipt_url text,
   lo_draft_url text,
   signed_lo_date date,
   commission_structure jsonb,
@@ -817,6 +823,8 @@ as $$
     sales_cases.race,
     sales_cases.buyer_type,
     sales_cases.booking_form_url,
+    sales_cases.customer_ic_url,
+    sales_cases.booking_receipt_url,
     sales_cases.lo_draft_url,
     sales_cases.signed_lo_date,
     sales_cases.commission_structure,

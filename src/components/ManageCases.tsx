@@ -176,14 +176,25 @@ export function ManageCases({ userId }: ManageCasesProps) {
     [profiles]
   );
 
+  const getCaseDateForMonthFilter = (record: SalesCaseRecord) => {
+    const dateValue = record.booking_date ?? record.created_at;
+    const parsedDate = dateValue ? new Date(dateValue) : null;
+
+    if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+      return null;
+    }
+
+    return parsedDate;
+  };
+
   const availableYearOptions = useMemo(() => {
     const yearValues = new Set<string>([selectedYearValue, `${today.getFullYear()}`]);
 
     cases.forEach((record) => {
-      const createdAt = record.created_at ? new Date(record.created_at) : null;
+      const filterDate = getCaseDateForMonthFilter(record);
 
-      if (createdAt && !Number.isNaN(createdAt.getTime())) {
-        yearValues.add(`${createdAt.getFullYear()}`);
+      if (filterDate) {
+        yearValues.add(`${filterDate.getFullYear()}`);
       }
     });
 
@@ -191,13 +202,13 @@ export function ManageCases({ userId }: ManageCasesProps) {
   }, [cases, selectedYearValue, today]);
 
   const matchesSelectedMonth = (record: SalesCaseRecord) => {
-    const createdAt = record.created_at ? new Date(record.created_at) : null;
+    const filterDate = getCaseDateForMonthFilter(record);
 
-    if (!createdAt || Number.isNaN(createdAt.getTime())) {
+    if (!filterDate) {
       return false;
     }
 
-    if (`${createdAt.getFullYear()}` !== selectedYearValue) {
+    if (`${filterDate.getFullYear()}` !== selectedYearValue) {
       return false;
     }
 
@@ -205,7 +216,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
       return true;
     }
 
-    return `${createdAt.getMonth() + 1}`.padStart(2, "0") === selectedMonthValue;
+    return `${filterDate.getMonth() + 1}`.padStart(2, "0") === selectedMonthValue;
   };
 
   const matchesSelectedProject = (record: SalesCaseRecord) =>
@@ -283,11 +294,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
   }, [profiles, summaryCases]);
 
   const totalMonthlyGDV = useMemo(
-    () => summaryCases.reduce((sum, record) => sum + (record.spa_price ?? 0), 0),
-    [summaryCases]
-  );
-
-  const totalMonthlyNettSales = useMemo(
     () => summaryCases.reduce((sum, record) => sum + (record.nett_price ?? 0), 0),
     [summaryCases]
   );
@@ -585,7 +591,12 @@ export function ManageCases({ userId }: ManageCasesProps) {
 
     try {
       const attachmentUrls = Array.from(
-        new Set([record.booking_form_url, record.lo_draft_url].filter(Boolean))
+        new Set([
+          record.booking_form_url,
+          record.customer_ic_url,
+          record.booking_receipt_url,
+          record.lo_draft_url,
+        ].filter(Boolean))
       ) as string[];
 
       await Promise.all(attachmentUrls.map((url) => deleteCaseFileFromStorage(url)));
@@ -615,7 +626,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
         console.error("Failed to create delete notifications for sales case", notificationError);
       }
 
-      setSuccess("Sales case deleted successfully, including the booking form and LO draft attachments.");
+      setSuccess("Sales case deleted successfully, including booking form, customer I/C, booking receipt, and LO draft attachments.");
       await fetchCases();
       setIsDeleting(false);
       setPendingDelete(null);
@@ -732,14 +743,10 @@ export function ManageCases({ userId }: ManageCasesProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-2 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-2 xl:grid-cols-5">
         <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
           <p className="text-sm font-medium text-gray-500 mb-2">Total GDV</p>
           <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlyGDV)}</p>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-sm font-medium text-gray-500 mb-2">Total Nett Sales</p>
-          <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlyNettSales)}</p>
         </div>
         <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
           <p className="text-sm font-medium text-gray-500 mb-2">Total Sales</p>

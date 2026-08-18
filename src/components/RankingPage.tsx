@@ -8,6 +8,7 @@ import {
 import {
   getCaseCommissionAmountForProfile,
   getCaseCommissionAmountForProfiles,
+  getCaseParticipantProfileIds,
   getCasePersonalAmountForProfile,
   getCasePersonalAmountForProfiles,
 } from "../lib/salesCaseMetrics";
@@ -116,6 +117,33 @@ const getDateMonthValue = (date: Date | null) => {
   }
 
   return getMonthInputValue(date);
+};
+
+const parseFilterDateValue = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1]);
+    const month = Number(dateOnlyMatch[2]);
+    const day = Number(dateOnlyMatch[3]);
+    return new Date(year, month - 1, day);
+  }
+
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate;
+};
+
+const getCaseDateForMonthFilter = (record: SalesCaseRecord) => {
+  return parseFilterDateValue(record.booking_date ?? record.created_at);
 };
 
 const normalizeRankCategory = (
@@ -309,10 +337,10 @@ export function RankingPage({ userId }: RankingPageProps) {
     const yearValues = new Set<string>([selectedYearValue, `${today.getFullYear()}`]);
 
     cases.forEach((record) => {
-      const createdAt = record.created_at ? new Date(record.created_at) : null;
+      const filterDate = getCaseDateForMonthFilter(record);
 
-      if (createdAt) {
-        yearValues.add(`${createdAt.getFullYear()}`);
+      if (filterDate) {
+        yearValues.add(`${filterDate.getFullYear()}`);
       }
     });
 
@@ -340,19 +368,21 @@ export function RankingPage({ userId }: RankingPageProps) {
   const monthlyCases = useMemo(
     () =>
       cases.filter((record) => {
-        const createdAt = record.created_at ? new Date(record.created_at) : null;
+        const filterDate = getCaseDateForMonthFilter(record);
         if (!selectedMonth) {
           return true;
         }
 
-        return getDateMonthValue(createdAt) === selectedMonth;
+        return getDateMonthValue(filterDate) === selectedMonth;
       }),
     [cases, selectedMonth]
   );
 
   const monthlyTopUpPayouts = useMemo(
-    () =>
-      payouts.filter((payout) => {
+    () => {
+      const caseById = new Map(cases.map((record) => [record.id, record]));
+
+      return payouts.filter((payout) => {
         if (payout.payout_type !== "tier_upgrade_top_up") {
           return false;
         }
@@ -361,10 +391,15 @@ export function RankingPage({ userId }: RankingPageProps) {
           return true;
         }
 
-        const createdAt = payout.created_at ? new Date(payout.created_at) : null;
-        return getDateMonthValue(createdAt) === selectedMonth;
-      }),
-    [payouts, selectedMonth]
+        const relatedCase = caseById.get(payout.sales_case_id);
+        const filterDate = relatedCase
+          ? getCaseDateForMonthFilter(relatedCase)
+          : parseFilterDateValue(payout.created_at);
+
+        return getDateMonthValue(filterDate) === selectedMonth;
+      });
+    },
+    [cases, payouts, selectedMonth]
   );
 
   const payoutsByCaseId = useMemo(() => {
@@ -524,7 +559,7 @@ export function RankingPage({ userId }: RankingPageProps) {
     return memberProfiles.map((profile) => {
       const rankCategory = normalizeRankCategory(profile);
       const personalGdv = monthlyCases.reduce(
-        (sum, record) => sum + getCasePersonalAmountForProfile(record, record.spa_price, profile.id),
+        (sum, record) => sum + getCasePersonalAmountForProfile(record, record.nett_price, profile.id),
         0
       );
       const personalDirectSales = monthlyCases.reduce((sum, record) => {
@@ -543,7 +578,11 @@ export function RankingPage({ userId }: RankingPageProps) {
         return sum + getHoldingCommissionAmountForProfile(record, profile.id);
       }, 0);
       const personalTopUpSales = monthlyTopUpPayouts
-        .filter((payout) => payout.profile_id === profile.id)
+        .filter(
+          (payout) =>
+            payout.profile_id === profile.id &&
+            isReleasedHoldingPayout(payout)
+        )
         .reduce((sum, payout) => sum + Number(payout.total_amount ?? 0), 0);
       const personalSales = personalDirectSales + personalHoldingSales + personalTopUpSales;
       const teamIds = new Set([profile.id, ...(descendantIdsByProfile.get(profile.id) ?? [])]);
@@ -551,27 +590,46 @@ export function RankingPage({ userId }: RankingPageProps) {
         rankCategory === "agent"
           ? personalGdv
           : monthlyCases.reduce(
-              (sum, record) => sum + getCasePersonalAmountForProfiles(record, record.spa_price, teamIds),
+              (sum, record) => sum + getCasePersonalAmountForProfiles(record, record.nett_price, teamIds),
               0
             );
       const teamSales =
         rankCategory === "agent"
           ? personalSales
           : monthlyCases.reduce((sum, record) => {
-              const relatedIds = [record.created_by, ...(record.involved_user_ids ?? [])].filter(Boolean) as string[];
+              const participantIds = getCaseParticipantProfileIds(record);
 
-              if (!relatedIds.some((profileId) => teamIds.has(profileId))) {
+              if (!participantIds.some((profileId) => teamIds.has(profileId))) {
                 return sum;
               }
 
               const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
               const directSales = getCaseCommissionAmountForProfiles(record, project, memberProfiles, teamIds);
-              const releasedHoldingSales = (payoutsByCaseId.get(record.id) ?? [])
-                .filter((payout) => isReleasedHoldingPayout(payout) && teamIds.has(payout.profile_id))
-                .reduce((holdingSum, payout) => holdingSum + Number(payout.total_amount ?? 0), 0);
+              const relatedPayouts = payoutsByCaseId.get(record.id) ?? [];
+              const teamMemberIds = Array.from(teamIds);
+              const unreleasedHoldingSales = teamMemberIds.reduce((holdingSum, teamProfileId) => {
+                const hasReleasedHoldingTopUp = relatedPayouts.some(
+                  (payout) => payout.profile_id === teamProfileId && isReleasedHoldingPayout(payout)
+                );
 
-              return sum + directSales + releasedHoldingSales;
+                if (hasReleasedHoldingTopUp) {
+                  return holdingSum;
+                }
+
+                return holdingSum + getHoldingCommissionAmountForProfile(record, teamProfileId);
+              }, 0);
+
+              return sum + directSales + unreleasedHoldingSales;
             }, 0);
+
+      const teamTopUpSales =
+        rankCategory === "agent"
+          ? 0
+          : monthlyTopUpPayouts
+              .filter((payout) => teamIds.has(payout.profile_id))
+              .reduce((sum, payout) => sum + Number(payout.total_amount ?? 0), 0);
+
+      const resolvedTeamSales = rankCategory === "agent" ? teamSales : teamSales + teamTopUpSales;
 
       return {
         profile,
@@ -579,7 +637,7 @@ export function RankingPage({ userId }: RankingPageProps) {
         personalGdv,
         personalSales,
         teamGdv,
-        teamSales,
+        teamSales: resolvedTeamSales,
       };
     });
   }, [descendantIdsByProfile, memberProfileMap, memberProfiles, monthlyCases, monthlyTopUpPayouts, payoutsByCaseId, projectMap]);

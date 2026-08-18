@@ -194,6 +194,7 @@ const ZH_TRANSLATIONS: Record<string, string> = {
   "SPA (RM)": "SPA（RM）",
   "Nett (RM)": "净价（RM）",
   "Commission %": "佣金 %",
+  "Release %": "发放 %",
   "Pre Leader Override %": "Pre Leader Override %",
   "Leader Override %": "Leader Override %",
   "Payout Comm (RM)": "支付佣金（RM）",

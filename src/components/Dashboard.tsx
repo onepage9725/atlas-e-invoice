@@ -86,6 +86,9 @@ const getLocalDateValueFromTimestamp = (value: string | null) => {
   return getLocalDateInputValue(parsedDate);
 };
 
+const getCaseDateValueForFilters = (record: SalesCaseRecord) =>
+  getLocalDateValueFromTimestamp(record.booking_date ?? record.created_at);
+
 const isMemberProfile = (profile: Pick<ProfileOption, "role" | "rank">) =>
   profile.role === "agent" ||
   profile.role === "leader" ||
@@ -601,13 +604,13 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
   const filteredCaseRows = useMemo(() => {
     return cases.filter((record) => {
-      const createdAt = getLocalDateValueFromTimestamp(record.created_at);
+      const caseDate = getCaseDateValueForFilters(record);
 
-      if (defaultFromDate && createdAt < defaultFromDate) {
+      if (defaultFromDate && caseDate < defaultFromDate) {
         return false;
       }
 
-      if (defaultToDate && createdAt > defaultToDate) {
+      if (defaultToDate && caseDate > defaultToDate) {
         return false;
       }
 
@@ -621,13 +624,13 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
     }
 
     return cases.filter((record) => {
-      const createdAt = getLocalDateValueFromTimestamp(record.created_at);
+      const caseDate = getCaseDateValueForFilters(record);
 
-      if (defaultFromDate && createdAt < defaultFromDate) {
+      if (defaultFromDate && caseDate < defaultFromDate) {
         return false;
       }
 
-      if (defaultToDate && createdAt > defaultToDate) {
+      if (defaultToDate && caseDate > defaultToDate) {
         return false;
       }
 
@@ -644,13 +647,13 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
     const teamIdSet = new Set([userId, ...downlineIds]);
 
     return cases.filter((record) => {
-      const createdAt = getLocalDateValueFromTimestamp(record.created_at);
+      const caseDate = getCaseDateValueForFilters(record);
 
-      if (defaultFromDate && createdAt < defaultFromDate) {
+      if (defaultFromDate && caseDate < defaultFromDate) {
         return false;
       }
 
-      if (defaultToDate && createdAt > defaultToDate) {
+      if (defaultToDate && caseDate > defaultToDate) {
         return false;
       }
 
@@ -660,11 +663,6 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
   }, [cases, defaultFromDate, defaultToDate, downlineIds, userId]);
 
   const totalMonthlyGdv = useMemo(
-    () => filteredCaseRows.reduce((sum, record) => sum + (record.spa_price ?? 0), 0),
-    [filteredCaseRows]
-  );
-
-  const totalMonthlySalesNett = useMemo(
     () => filteredCaseRows.reduce((sum, record) => sum + (record.nett_price ?? 0), 0),
     [filteredCaseRows]
   );
@@ -777,7 +775,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
     }
 
     return memberCaseRows.reduce(
-      (sum, record) => sum + getCasePersonalAmountForProfiles(record, record.spa_price ?? 0, [userId]),
+      (sum, record) => sum + getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, [userId]),
       0
     );
   }, [memberCaseRows, userId]);
@@ -801,7 +799,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       const baseStatus = normalizeCaseStatus(record.status);
       const directStatus = viewerPayout?.payout_status === "Paid" ? "Completed" : baseStatus;
       const directRow: PersonalRow = {
-        createdAt: record.created_at,
+        createdAt: record.booking_date ?? record.created_at,
         displayStatus: directStatus,
         displayCommission: getViewerCommission(record),
       };
@@ -821,7 +819,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       return [
         directRow,
         {
-          createdAt: record.created_at,
+          createdAt: record.booking_date ?? record.created_at,
           displayStatus: directStatus,
           displayCommission: holdingAmount,
         },
@@ -838,7 +836,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
         }
 
         return [{
-          createdAt: payout.created_at,
+          createdAt: relatedCase.booking_date ?? relatedCase.created_at ?? payout.created_at,
           displayStatus: payout.payout_status === "Paid" ? "Completed" : payout.payout_status,
           displayCommission: payout.total_amount,
         }];
@@ -867,7 +865,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
     const directAndHoldingRows: PersonalRow[] = memberCaseRows.flatMap((record) => {
       const directRow: PersonalRow = {
-        createdAt: record.created_at,
+        createdAt: record.booking_date ?? record.created_at,
         displayCommission: getViewerCommission(record),
       };
 
@@ -886,7 +884,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       return [
         directRow,
         {
-          createdAt: record.created_at,
+          createdAt: record.booking_date ?? record.created_at,
           displayCommission: holdingAmount,
         },
       ];
@@ -902,7 +900,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
         }
 
         return [{
-          createdAt: payout.created_at,
+          createdAt: relatedCase.booking_date ?? relatedCase.created_at ?? payout.created_at,
           displayCommission: payout.total_amount,
         }];
       });
@@ -935,13 +933,13 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
   const teamOverviewCaseRows = useMemo(() => {
     return cases.filter((record) => {
-      const createdAt = getLocalDateValueFromTimestamp(record.created_at);
+      const caseDate = getCaseDateValueForFilters(record);
 
-      if (defaultFromDate && createdAt < defaultFromDate) {
+      if (defaultFromDate && caseDate < defaultFromDate) {
         return false;
       }
 
-      if (defaultToDate && createdAt > defaultToDate) {
+      if (defaultToDate && caseDate > defaultToDate) {
         return false;
       }
 
@@ -951,7 +949,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
   }, [cases, defaultFromDate, defaultToDate, teamMemberIds]);
 
   const totalTeamMonthlyGdvForMembers = useMemo(
-    () => memberTeamCaseRows.reduce((sum, record) => sum + getCasePersonalAmountForProfiles(record, record.spa_price ?? 0, teamMemberIds), 0),
+    () => memberTeamCaseRows.reduce((sum, record) => sum + getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, teamMemberIds), 0),
     [memberTeamCaseRows, teamMemberIds]
   );
 
@@ -991,12 +989,12 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
             return sum;
           }
 
-          const payoutCreatedAt = getLocalDateValueFromTimestamp(payout.created_at);
+          const caseDate = getCaseDateValueForFilters(relatedCase);
 
           if (
-            !payoutCreatedAt ||
-            (defaultFromDate && payoutCreatedAt < defaultFromDate) ||
-            (defaultToDate && payoutCreatedAt > defaultToDate)
+            !caseDate ||
+            (defaultFromDate && caseDate < defaultFromDate) ||
+            (defaultToDate && caseDate > defaultToDate)
           ) {
             return sum;
           }
@@ -1031,7 +1029,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       const computeMemberConverted = (profileId: string) => {
         const memberCaseRows = cases.filter((record) => {
           const relatedIds = [record.created_by, ...(record.involved_user_ids ?? []), getStoredInvolvedProfileId(record)].filter(Boolean) as string[];
-          return relatedIds.includes(profileId) && isWithinCurrentMonth(record.created_at);
+          return relatedIds.includes(profileId) && isWithinCurrentMonth(record.booking_date ?? record.created_at);
         });
 
         const memberCaseIds = new Set(memberCaseRows.map((record) => record.id));
@@ -1198,7 +1196,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
               const relatedIds = [record.created_by, ...(record.involved_user_ids ?? []), getStoredInvolvedProfileId(record)]
                 .filter(Boolean) as string[];
 
-              return relatedIds.includes(profileId) && isWithinCurrentMonth(record.created_at);
+              return relatedIds.includes(profileId) && isWithinCurrentMonth(record.booking_date ?? record.created_at);
             })
             .map((record) => record.id)
         );
@@ -1400,11 +1398,6 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
             <p className="text-sm font-medium text-gray-500 mb-2">Total GDV</p>
             <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlyGdv)}</p>
-            <p className="text-xs text-gray-500 mt-2">Total SPA price from all cases within the current month.</p>
-          </div>
-          <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-            <p className="text-sm font-medium text-gray-500 mb-2">Total Nett Sales</p>
-            <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlySalesNett)}</p>
             <p className="text-xs text-gray-500 mt-2">Total nett price from all cases within the current month.</p>
           </div>
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
@@ -1449,14 +1442,10 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
           </div>
         </div>
       ) : isAdmin ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
             <p className="text-sm font-medium text-gray-500 mb-2">Total GDV</p>
             <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlyGdv)}</p>
-          </div>
-          <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-            <p className="text-sm font-medium text-gray-500 mb-2">Total Nett Sales</p>
-            <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlySalesNett)}</p>
           </div>
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
             <p className="text-sm font-medium text-gray-500 mb-2">Total Sales</p>

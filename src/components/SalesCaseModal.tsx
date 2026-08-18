@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Save, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Save, Trash2, Upload, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import {
   createCaseNotifications,
@@ -235,6 +235,7 @@ export type SalesCaseRecord = {
   customer_contact_number: string | null;
   customer_email: string | null;
   customer_address: string | null;
+  customer_details: CustomerDetail[] | null;
   emergency_contact_name: string | null;
   emergency_contact_relationship: string | null;
   emergency_contact_ic_passport: string | null;
@@ -243,6 +244,8 @@ export type SalesCaseRecord = {
   race: string | null;
   buyer_type: string | null;
   booking_form_url: string | null;
+  customer_ic_url: string | null;
+  booking_receipt_url: string | null;
   lo_draft_url: string | null;
   signed_lo_date: string | null;
   commission_structure: CommissionStructure | null;
@@ -260,6 +263,14 @@ export type SalesCaseRecord = {
   commission_review_sent_at: string | null;
   commission_review_sent_by: string | null;
   created_at: string;
+};
+
+type CustomerDetail = {
+  name: string;
+  id: string;
+  contactNumber: string;
+  email: string;
+  address: string;
 };
 
 type SalesCaseModalProps = {
@@ -289,18 +300,83 @@ const getStoredInvolvedProfileId = (record: SalesCaseRecord | null) => {
     return "";
   }
 
-  if (record.involved_profile_id) {
-    return record.involved_profile_id;
-  }
-
-  const legacyInvolvedIds = (record.involved_user_ids ?? []).filter(
-    (profileId) => profileId !== record.created_by
-  );
-
-  return legacyInvolvedIds.length === 1 ? legacyInvolvedIds[0] : "";
+  return record.involved_profile_id ?? "";
 };
 
 const getTodayDate = () => new Date().toISOString().slice(0, 10);
+
+const createEmptyCustomerDetail = (): CustomerDetail => ({
+  name: "",
+  id: "",
+  contactNumber: "",
+  email: "",
+  address: "",
+});
+
+const normalizeCustomerDetails = (value: unknown): CustomerDetail[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const typedItem = item as Record<string, unknown>;
+
+      return {
+        name: typeof typedItem.name === "string" ? typedItem.name : "",
+        id: typeof typedItem.id === "string" ? typedItem.id : "",
+        contactNumber:
+          typeof typedItem.contactNumber === "string" ? typedItem.contactNumber : "",
+        email: typeof typedItem.email === "string" ? typedItem.email : "",
+        address: typeof typedItem.address === "string" ? typedItem.address : "",
+      };
+    })
+    .filter((item): item is CustomerDetail => Boolean(item));
+};
+
+const sanitizeCustomerDetails = (customers: CustomerDetail[]) =>
+  customers
+    .map((customer) => ({
+      name: customer.name.trim(),
+      id: customer.id.trim(),
+      contactNumber: customer.contactNumber.trim(),
+      email: customer.email.trim(),
+      address: customer.address.trim(),
+    }))
+    .filter(
+      (customer) =>
+        customer.name ||
+        customer.id ||
+        customer.contactNumber ||
+        customer.email ||
+        customer.address
+    );
+
+const getInitialCustomerDetails = (record: SalesCaseRecord | null): CustomerDetail[] => {
+  if (!record) {
+    return [createEmptyCustomerDetail()];
+  }
+
+  const fromJson = normalizeCustomerDetails(record.customer_details);
+
+  if (fromJson.length > 0) {
+    return fromJson;
+  }
+
+  return [
+    {
+      name: record.customer_name ?? "",
+      id: record.customer_id ?? "",
+      contactNumber: record.customer_contact_number ?? "",
+      email: record.customer_email ?? "",
+      address: record.customer_address ?? "",
+    },
+  ];
+};
 
 const createEmptyForm = () => ({
   caseOwnerId: "",
@@ -311,11 +387,7 @@ const createEmptyForm = () => ({
   nettPrice: "",
   bookingFee: "",
   unitNumber: "",
-  customerName: "",
-  customerId: "",
-  customerContactNumber: "",
-  customerEmail: "",
-  customerAddress: "",
+  customers: [createEmptyCustomerDetail()],
   emergencyContactName: "",
   emergencyContactRelationship: "",
   emergencyContactIcPassport: "",
@@ -325,6 +397,8 @@ const createEmptyForm = () => ({
   raceOther: "",
   buyerType: "Loan",
   bookingFormName: "",
+  customerIcName: "",
+  bookingReceiptName: "",
   status: "Pending" as SalesCaseStatus,
   loDraftName: "",
   signedLoDate: "",
@@ -339,7 +413,7 @@ function toNumberOrNull(value: string) {
 }
 
 const shouldRetryWithoutExtendedContactColumns = (message: string) =>
-  /Could not find the 'customer_address' column|Could not find the 'emergency_contact_|Could not find the 'signed_lo_date' column/i.test(message);
+  /Could not find the 'customer_address' column|Could not find the 'customer_details' column|Could not find the 'customer_ic_url' column|Could not find the 'booking_receipt_url' column|Could not find the 'emergency_contact_|Could not find the 'signed_lo_date' column/i.test(message);
 
 const isRowLevelSecurityError = (message: string) =>
   /row-level security policy|violates row-level security|new row violates row-level security/i.test(message);
@@ -347,6 +421,9 @@ const isRowLevelSecurityError = (message: string) =>
 const stripExtendedContactColumns = <T extends Record<string, unknown>>(payload: T) => {
   const {
     customer_address,
+    customer_details,
+    customer_ic_url,
+    booking_receipt_url,
     emergency_contact_name,
     emergency_contact_relationship,
     emergency_contact_ic_passport,
@@ -357,6 +434,9 @@ const stripExtendedContactColumns = <T extends Record<string, unknown>>(payload:
   } = payload;
 
   void customer_address;
+  void customer_details;
+  void customer_ic_url;
+  void booking_receipt_url;
   void emergency_contact_name;
   void emergency_contact_relationship;
   void emergency_contact_ic_passport;
@@ -386,6 +466,8 @@ export function SalesCaseModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bookingFormFile, setBookingFormFile] = useState<File | null>(null);
+  const [customerIcFile, setCustomerIcFile] = useState<File | null>(null);
+  const [bookingReceiptFile, setBookingReceiptFile] = useState<File | null>(null);
   const [loDraftFile, setLoDraftFile] = useState<File | null>(null);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
 
@@ -423,6 +505,8 @@ export function SalesCaseModal({
     if (!initialCase) {
       setFormData(createEmptyForm());
       setBookingFormFile(null);
+      setCustomerIcFile(null);
+      setBookingReceiptFile(null);
       setLoDraftFile(null);
       return;
     }
@@ -440,11 +524,7 @@ export function SalesCaseModal({
       nettPrice: formatNumberInput(initialCase.nett_price),
       bookingFee: formatNumberInput(initialCase.booking_fee),
       unitNumber: initialCase.unit_number ?? "",
-      customerName: initialCase.customer_name ?? "",
-      customerId: initialCase.customer_id ?? "",
-      customerContactNumber: initialCase.customer_contact_number ?? "",
-      customerEmail: initialCase.customer_email ?? "",
-      customerAddress: initialCase.customer_address ?? "",
+      customers: getInitialCustomerDetails(initialCase),
       emergencyContactName: initialCase.emergency_contact_name ?? "",
       emergencyContactRelationship: initialCase.emergency_contact_relationship ?? "",
       emergencyContactIcPassport: initialCase.emergency_contact_ic_passport ?? "",
@@ -456,6 +536,12 @@ export function SalesCaseModal({
       bookingFormName: initialCase.booking_form_url
         ? initialCase.booking_form_url.split("/").pop() ?? ""
         : "",
+      customerIcName: initialCase.customer_ic_url
+        ? initialCase.customer_ic_url.split("/").pop() ?? ""
+        : "",
+      bookingReceiptName: initialCase.booking_receipt_url
+        ? initialCase.booking_receipt_url.split("/").pop() ?? ""
+        : "",
       status: normalizeCaseStatus(initialCase.status),
       loDraftName: initialCase.lo_draft_url
         ? initialCase.lo_draft_url.split("/").pop() ?? ""
@@ -463,6 +549,8 @@ export function SalesCaseModal({
       signedLoDate: initialCase.signed_lo_date ?? "",
     });
     setBookingFormFile(null);
+    setCustomerIcFile(null);
+    setBookingReceiptFile(null);
     setLoDraftFile(null);
   }, [initialCase]);
 
@@ -671,6 +759,39 @@ export function SalesCaseModal({
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleCustomerChange = (
+    index: number,
+    field: keyof CustomerDetail,
+    value: string
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      customers: prev.customers.map((customer, customerIndex) =>
+        customerIndex === index ? { ...customer, [field]: value } : customer
+      ),
+    }));
+  };
+
+  const addCustomerDetail = () => {
+    setFormData((prev) => ({
+      ...prev,
+      customers: [...prev.customers, createEmptyCustomerDetail()],
+    }));
+  };
+
+  const removeCustomerDetail = (index: number) => {
+    setFormData((prev) => {
+      if (prev.customers.length <= 1) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        customers: prev.customers.filter((_, customerIndex) => customerIndex !== index),
+      };
+    });
+  };
+
   const handleBookingFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     setBookingFormFile(file);
@@ -681,6 +802,18 @@ export function SalesCaseModal({
     const file = e.target.files?.[0] ?? null;
     setLoDraftFile(file);
     setFormData((prev) => ({ ...prev, loDraftName: file ? file.name : prev.loDraftName }));
+  };
+
+  const handleCustomerIcChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setCustomerIcFile(file);
+    setFormData((prev) => ({ ...prev, customerIcName: file ? file.name : "" }));
+  };
+
+  const handleBookingReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setBookingReceiptFile(file);
+    setFormData((prev) => ({ ...prev, bookingReceiptName: file ? file.name : "" }));
   };
 
   const getStoragePathFromUrl = (url: string, bucket: string) => {
@@ -728,6 +861,36 @@ export function SalesCaseModal({
     return data.publicUrl;
   };
 
+  const uploadCustomerIc = async () => {
+    if (!customerIcFile) return initialCase?.customer_ic_url ?? null;
+    const filePath = `${userId}/${Date.now()}-${sanitizeFileName(customerIcFile.name)}`;
+    const { error: uploadError } = await supabase.storage
+      .from("cases")
+      .upload(filePath, customerIcFile, { upsert: true });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
+    return data.publicUrl;
+  };
+
+  const uploadBookingReceipt = async () => {
+    if (!bookingReceiptFile) return initialCase?.booking_receipt_url ?? null;
+    const filePath = `${userId}/${Date.now()}-${sanitizeFileName(bookingReceiptFile.name)}`;
+    const { error: uploadError } = await supabase.storage
+      .from("cases")
+      .upload(filePath, bookingReceiptFile, { upsert: true });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
+    return data.publicUrl;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -762,8 +925,30 @@ export function SalesCaseModal({
       return;
     }
 
+    const normalizedCustomers = sanitizeCustomerDetails(formData.customers);
+
+    if (normalizedCustomers.length === 0) {
+      setError("Please add at least one customer detail.");
+      return;
+    }
+
+    if (normalizedCustomers.some((customer) => !customer.name || !customer.id)) {
+      setError("Each customer must have a name and IC/Passport.");
+      return;
+    }
+
     if (!isEditing && !bookingFormFile) {
       setError("Please attach the booking form PDF.");
+      return;
+    }
+
+    if (!isEditing && !customerIcFile) {
+      setError("Please attach the customer I/C document.");
+      return;
+    }
+
+    if (!isEditing && !bookingReceiptFile) {
+      setError("Please attach the booking receipt.");
       return;
     }
 
@@ -771,6 +956,8 @@ export function SalesCaseModal({
 
     try {
       let bookingFormUrl: string | null = initialCase?.booking_form_url ?? null;
+      let customerIcUrl: string | null = initialCase?.customer_ic_url ?? null;
+      let bookingReceiptUrl: string | null = initialCase?.booking_receipt_url ?? null;
       let loDraftUrl: string | null = initialCase?.lo_draft_url ?? null;
 
       try {
@@ -800,6 +987,35 @@ export function SalesCaseModal({
 
         throw uploadError;
       }
+
+      try {
+        customerIcUrl = await uploadCustomerIc();
+      } catch (uploadError) {
+        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
+
+        if (isRowLevelSecurityError(uploadMessage)) {
+          setError("Customer I/C upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        throw uploadError;
+      }
+
+      try {
+        bookingReceiptUrl = await uploadBookingReceipt();
+      } catch (uploadError) {
+        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
+
+        if (isRowLevelSecurityError(uploadMessage)) {
+          setError("Booking receipt upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        throw uploadError;
+      }
+
       const nextStatus = enableWorkflowFields && isEditing ? formData.status : "Pending";
       const nextCommissionStructure = selectedCommissionStructure;
 
@@ -848,6 +1064,8 @@ export function SalesCaseModal({
         )
       ) as string[];
 
+      const primaryCustomer = normalizedCustomers[0];
+
       const payload: {
         project_id: string;
         booking_date: string;
@@ -860,6 +1078,7 @@ export function SalesCaseModal({
         customer_contact_number: string;
         customer_email: string;
         customer_address: string;
+        customer_details?: CustomerDetail[];
         emergency_contact_name: string;
         emergency_contact_relationship: string;
         emergency_contact_ic_passport: string;
@@ -868,6 +1087,8 @@ export function SalesCaseModal({
         race: string;
         buyer_type: string;
         booking_form_url: string | null;
+        customer_ic_url: string | null;
+        booking_receipt_url: string | null;
         commission_structure: CommissionStructure;
         lo_draft_url?: string | null;
         signed_lo_date?: string | null;
@@ -886,11 +1107,12 @@ export function SalesCaseModal({
         nett_price: toNumberOrNull(formData.nettPrice),
         booking_fee: toNumberOrNull(formData.bookingFee),
         unit_number: formData.unitNumber,
-        customer_name: formData.customerName,
-        customer_id: formData.customerId,
-        customer_contact_number: formData.customerContactNumber,
-        customer_email: formData.customerEmail,
-        customer_address: formData.customerAddress,
+        customer_name: normalizedCustomers.map((customer) => customer.name).join(" / "),
+        customer_id: normalizedCustomers.map((customer) => customer.id).join(" / "),
+        customer_contact_number: primaryCustomer.contactNumber,
+        customer_email: primaryCustomer.email,
+        customer_address: primaryCustomer.address,
+        customer_details: normalizedCustomers,
         emergency_contact_name: formData.emergencyContactName,
         emergency_contact_relationship: formData.emergencyContactRelationship,
         emergency_contact_ic_passport: formData.emergencyContactIcPassport,
@@ -899,6 +1121,8 @@ export function SalesCaseModal({
         race: formData.race === "Other" ? formData.raceOther : formData.race,
         buyer_type: formData.buyerType,
         booking_form_url: bookingFormUrl,
+        customer_ic_url: customerIcUrl,
+        booking_receipt_url: bookingReceiptUrl,
         commission_structure: nextCommissionStructure,
         created_by: caseOwnerId,
         involved_profile_id: formData.involvedUserId || null,
@@ -939,6 +1163,14 @@ export function SalesCaseModal({
 
         if (bookingFormFile && initialCase.booking_form_url) {
           await deleteBookingFormFromStorage(initialCase.booking_form_url);
+        }
+
+        if (customerIcFile && initialCase.customer_ic_url) {
+          await deleteBookingFormFromStorage(initialCase.customer_ic_url);
+        }
+
+        if (bookingReceiptFile && initialCase.booking_receipt_url) {
+          await deleteBookingFormFromStorage(initialCase.booking_receipt_url);
         }
 
         if (enableWorkflowFields && loDraftFile && initialCase.lo_draft_url) {
@@ -1367,71 +1599,99 @@ export function SalesCaseModal({
           </div>
 
           <div className="space-y-4 rounded-lg border border-gray-100 bg-gray-50/60 p-4">
-            <h4 className="text-base font-semibold text-gray-800">Customer Details</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
-                <input
-                  type="text"
-                  name="customerName"
-                  value={formData.customerName}
-                  onChange={handleChange}
-                  placeholder="e.g. John Doe"
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer IC / Passport
-                </label>
-                <input
-                  type="text"
-                  name="customerId"
-                  value={formData.customerId}
-                  onChange={handleChange}
-                  placeholder="e.g. 900101-01-1234"
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-                  required
-                />
-              </div>
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-base font-semibold text-gray-800">Customer Details</h4>
+              <button
+                type="button"
+                onClick={addCustomerDetail}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                <Plus className="h-4 w-4" />
+                Add Customer
+              </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer Contact Number
-                </label>
-                <input
-                  type="text"
-                  name="customerContactNumber"
-                  value={formData.customerContactNumber}
-                  onChange={handleChange}
-                  placeholder="e.g. 012-3456789"
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Customer Email</label>
-                <input
-                  type="email"
-                  name="customerEmail"
-                  value={formData.customerEmail}
-                  onChange={handleChange}
-                  placeholder="e.g. john.doe@example.com"
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Address</label>
-              <input
-                type="text"
-                name="customerAddress"
-                value={formData.customerAddress}
-                onChange={handleChange}
-                placeholder="e.g. 123, Jalan Ampang, 50450 Kuala Lumpur"
-                className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-              />
+
+            <div className="space-y-4">
+              {formData.customers.map((customer, index) => (
+                <div key={`customer-${index}`} className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h5 className="text-sm font-semibold text-gray-700">Customer {index + 1}</h5>
+                    {formData.customers.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeCustomerDetail(index)}
+                        className="inline-flex items-center gap-1 text-xs rounded-md border border-red-200 px-2 py-1 text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+                      <input
+                        type="text"
+                        value={customer.name}
+                        onChange={(event) => handleCustomerChange(index, "name", event.target.value)}
+                        placeholder="e.g. John Doe"
+                        className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Customer IC / Passport
+                      </label>
+                      <input
+                        type="text"
+                        value={customer.id}
+                        onChange={(event) => handleCustomerChange(index, "id", event.target.value)}
+                        placeholder="e.g. 900101-01-1234"
+                        className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Customer Contact Number
+                      </label>
+                      <input
+                        type="text"
+                        value={customer.contactNumber}
+                        onChange={(event) => handleCustomerChange(index, "contactNumber", event.target.value)}
+                        placeholder="e.g. 012-3456789"
+                        className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Customer Email</label>
+                      <input
+                        type="email"
+                        value={customer.email}
+                        onChange={(event) => handleCustomerChange(index, "email", event.target.value)}
+                        placeholder="e.g. john.doe@example.com"
+                        className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Customer Address</label>
+                    <input
+                      type="text"
+                      value={customer.address}
+                      onChange={(event) => handleCustomerChange(index, "address", event.target.value)}
+                      placeholder="e.g. 123, Jalan Ampang, 50450 Kuala Lumpur"
+                      className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -1570,7 +1830,66 @@ export function SalesCaseModal({
                 )}
               </div>
               <p className="text-xs text-gray-400 mt-2">
-                Combine booking form, IC/passport, and booking receipt in one PDF.
+                Upload only the booking form document.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Attach Customer I/C (PDF/Image)</label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                  <Upload className="w-4 h-4 text-gray-500" />
+                  Upload File
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    onChange={handleCustomerIcChange}
+                    className="hidden"
+                  />
+                </label>
+                <span className="text-xs text-gray-500">
+                  {formData.customerIcName || "No file selected"}
+                </span>
+                {initialCase?.customer_ic_url && (
+                  <a
+                    href={initialCase.customer_ic_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs rounded-md border border-blue-200 px-2 py-1 text-blue-700 hover:text-blue-800"
+                  >
+                    View
+                  </a>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Attach Booking Receipt (PDF/Image)</label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                  <Upload className="w-4 h-4 text-gray-500" />
+                  Upload File
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    onChange={handleBookingReceiptChange}
+                    className="hidden"
+                  />
+                </label>
+                <span className="text-xs text-gray-500">
+                  {formData.bookingReceiptName || "No file selected"}
+                </span>
+                {initialCase?.booking_receipt_url && (
+                  <a
+                    href={initialCase.booking_receipt_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs rounded-md border border-blue-200 px-2 py-1 text-blue-700 hover:text-blue-800"
+                  >
+                    View
+                  </a>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                New cases require booking form, customer I/C, and booking receipt uploads.
               </p>
             </div>
           </div>

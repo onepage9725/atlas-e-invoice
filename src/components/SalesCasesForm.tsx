@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { fetchNotificationProfiles, notifyDeleteRequest } from "../lib/notifications";
 import { supabase } from "../lib/supabaseClient";
@@ -198,6 +198,7 @@ const getDateMonthValue = (date: Date | null) => {
 
 export function SalesCasesForm({ userId }: SalesCasesFormProps) {
   const today = new Date();
+  const profileFetchRequestIdRef = useRef(0);
   const [cases, setCases] = useState<SalesCaseRecord[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
@@ -515,8 +516,12 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
   };
 
   const fetchProfiles = async (profileIds: string[]) => {
+    const requestId = ++profileFetchRequestIdRef.current;
+
     if (profileIds.length === 0) {
-      setProfiles([]);
+      if (requestId === profileFetchRequestIdRef.current) {
+        setProfiles([]);
+      }
       return;
     }
 
@@ -536,7 +541,9 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
         .in("id", idsToFetch);
 
       if (fetchError) {
-        setError(fetchError.message);
+        if (requestId === profileFetchRequestIdRef.current) {
+          setError(fetchError.message);
+        }
         return;
       }
 
@@ -551,7 +558,9 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
         );
     }
 
-    setProfiles(Array.from(loadedProfiles.values()));
+    if (requestId === profileFetchRequestIdRef.current) {
+      setProfiles(Array.from(loadedProfiles.values()));
+    }
   };
 
   useEffect(() => {
@@ -714,7 +723,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
         ? profileMap.get(record.created_by)?.name || profileMap.get(record.created_by)?.email || "-"
         : "-";
       const createdAt = record.created_at ? new Date(record.created_at) : null;
-      const bookingDate = record.booking_date ? new Date(record.booking_date) : null;
+      const bookingDate = record.booking_date ? new Date(record.booking_date) : createdAt;
       const status = normalizeCaseStatus(record.status);
       const isLocked = isCaseLockedForEditing(record.status);
       const viewerCommissionBreakdown = getViewerCommissionBreakdown(record);
@@ -765,8 +774,8 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
     const yearValues = new Set<string>([selectedYearValue, `${today.getFullYear()}`]);
 
     displaySalesCaseRows.forEach((item) => {
-      if (item.createdAt) {
-        yearValues.add(`${item.createdAt.getFullYear()}`);
+      if (item.bookingDate) {
+        yearValues.add(`${item.bookingDate.getFullYear()}`);
       }
     });
 
@@ -790,7 +799,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
     }
 
     return displaySalesCaseRows.filter((item) => {
-      if (getDateMonthValue(item.createdAt) !== selectedMonth) {
+      if (getDateMonthValue(item.bookingDate) !== selectedMonth) {
         return false;
       }
 
@@ -820,7 +829,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
   const totalMonthlyGDV = useMemo(
     () =>
       selectedMonthBaseRows.reduce(
-        (sum, item) => sum + getCasePersonalAmountForProfile(item.row.record, item.row.record.spa_price, userId),
+        (sum, item) => sum + getCasePersonalAmountForProfile(item.row.record, item.row.record.nett_price, userId),
         0
       ),
     [selectedMonthBaseRows, userId]

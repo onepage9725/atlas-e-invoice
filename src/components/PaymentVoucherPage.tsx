@@ -9,6 +9,9 @@ type ProfileOption = {
   id: string;
   name: string | null;
   email: string | null;
+  ic_no: string | null;
+  bank_name: string | null;
+  bank_account_number: string | null;
 };
 
 type VoucherBreakdownRow = {
@@ -397,6 +400,14 @@ const buildUniqueVoucherPath = (userId: string, rows: VoucherBreakdownRow[]) => 
   return `payment-vouchers/${userId}/${timestamp}-${randomSuffix}/${baseFileName}`;
 };
 
+const formatEditableNumber = (value: number, decimals = 2) => {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  return Number(value.toFixed(decimals)).toString();
+};
+
 
 const getVoucherComponentBreakdown = (row: VoucherBreakdownRow): VoucherComponentBreakdown[] => {
   const holdingLabelSuffix = row.isHoldingComm ? " (Holding Comm)" : "";
@@ -453,6 +464,27 @@ const getVoucherComponentBreakdown = (row: VoucherBreakdownRow): VoucherComponen
   });
 };
 
+const getRemainingPercentage = (component: VoucherComponentBreakdown, remainingAmount: number) => {
+  if (component.amount <= 0 || component.percentage <= 0) {
+    return 0;
+  }
+
+  return Number(((remainingAmount / component.amount) * component.percentage).toFixed(3));
+};
+
+const getAmountFromReleasePercentage = (
+  component: VoucherComponentBreakdown,
+  releasePercentage: number,
+  remainingAmount: number
+) => {
+  if (component.percentage <= 0 || component.amount <= 0 || releasePercentage <= 0) {
+    return 0;
+  }
+
+  const proportionalAmount = (component.amount * releasePercentage) / component.percentage;
+  return Number(Math.min(proportionalAmount, remainingAmount).toFixed(2));
+};
+
 export function PaymentVoucherPage({
   userId,
   canGenerateVoucher = true,
@@ -471,6 +503,7 @@ export function PaymentVoucherPage({
   const [expandedCaseIds, setExpandedCaseIds] = useState<string[]>([]);
   const [selectedComponentKeys, setSelectedComponentKeys] = useState<string[]>([]);
   const [batchAmountsByComponentKey, setBatchAmountsByComponentKey] = useState<Record<string, string>>({});
+  const [batchReleasePercentByComponentKey, setBatchReleasePercentByComponentKey] = useState<Record<string, string>>({});
   const [batchRemarksByComponentKey, setBatchRemarksByComponentKey] = useState<Record<string, string>>({});
   const [voucherHistory, setVoucherHistory] = useState<VoucherHistoryEntry[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -640,12 +673,66 @@ export function PaymentVoucherPage({
       .select("*")
       .in("id", salesCaseIds);
 
-    const profileFetchResult = profileIds.length > 0
-      ? await supabase.from("profiles").select("id, name, email").in("id", profileIds)
-      : { data: [], error: null };
+    let profileData: ProfileOption[] = [];
+    let profileError: string | null = null;
 
-    const profileData = profileFetchResult.data;
-    const profileError = profileFetchResult.error;
+    if (profileIds.length > 0) {
+      const fullProfileResult = await supabase
+        .from("profiles")
+        .select("id, name, email, ic_no, bank_name, bank_account_number")
+        .in("id", profileIds);
+
+      if (!fullProfileResult.error) {
+        profileData = (fullProfileResult.data as ProfileOption[]) ?? [];
+      } else {
+        const fullErrorMessage = fullProfileResult.error.message || "";
+        const canRetryWithoutIc = /ic_no/i.test(fullErrorMessage);
+        const canRetryWithoutBank = /bank_name|bank_account_number/i.test(fullErrorMessage);
+
+        if (canRetryWithoutIc || canRetryWithoutBank) {
+          const withoutIcResult = await supabase
+            .from("profiles")
+            .select("id, name, email, bank_name, bank_account_number")
+            .in("id", profileIds);
+
+          if (!withoutIcResult.error) {
+            profileData = ((withoutIcResult.data ?? []) as Array<
+              Pick<ProfileOption, "id" | "name" | "email" | "bank_name" | "bank_account_number">
+            >).map((profile) => ({
+              ...profile,
+              ic_no: null,
+            }));
+          } else {
+            const withoutIcErrorMessage = withoutIcResult.error.message || "";
+            const canRetryMinimal = /bank_name|bank_account_number/i.test(withoutIcErrorMessage);
+
+            if (canRetryMinimal) {
+              const minimalResult = await supabase
+                .from("profiles")
+                .select("id, name, email")
+                .in("id", profileIds);
+
+              if (!minimalResult.error) {
+                profileData = ((minimalResult.data ?? []) as Array<
+                  Pick<ProfileOption, "id" | "name" | "email">
+                >).map((profile) => ({
+                  ...profile,
+                  ic_no: null,
+                  bank_name: null,
+                  bank_account_number: null,
+                }));
+              } else {
+                profileError = minimalResult.error.message;
+              }
+            } else {
+              profileError = withoutIcResult.error.message;
+            }
+          }
+        } else {
+          profileError = fullProfileResult.error.message;
+        }
+      }
+    }
 
     if (caseError) {
       setError(caseError.message);
@@ -653,13 +740,13 @@ export function PaymentVoucherPage({
     }
 
     if (profileError) {
-      setError(profileError.message);
+      setError(profileError);
       return;
     }
 
     const nextCases = (caseData as SalesCaseRecord[]) ?? [];
     setCases(nextCases);
-    setProfiles((profileData as ProfileOption[]) ?? []);
+    setProfiles(profileData);
 
     const projectIds = Array.from(new Set(nextCases.map((record) => record.project_id).filter(Boolean))) as string[];
 
@@ -926,7 +1013,7 @@ export function PaymentVoucherPage({
       selectedComponentRows.forEach((item) => {
         const existingValue = Number(next[item.componentKey]);
         if (!Number.isFinite(existingValue) || existingValue <= 0 || existingValue > item.remainingAmount + PAYMENT_EPSILON) {
-          next[item.componentKey] = item.remainingAmount.toFixed(2);
+          next[item.componentKey] = formatEditableNumber(item.remainingAmount, 2);
         }
       });
 
@@ -951,7 +1038,101 @@ export function PaymentVoucherPage({
 
       return next;
     });
+
+    setBatchReleasePercentByComponentKey((prev) => {
+      const next = { ...prev };
+      const selectedKeys = new Set(selectedComponentRows.map((item) => item.componentKey));
+
+      Object.keys(next).forEach((key) => {
+        if (!selectedKeys.has(key)) {
+          delete next[key];
+        }
+      });
+
+      selectedComponentRows.forEach((item) => {
+        const existingValue = Number(next[item.componentKey]);
+        const maxReleasePercentage = getRemainingPercentage(item.component, item.remainingAmount);
+
+        if (
+          !Number.isFinite(existingValue) ||
+          existingValue < 0 ||
+          existingValue > maxReleasePercentage + PAYMENT_EPSILON
+        ) {
+          next[item.componentKey] = formatEditableNumber(maxReleasePercentage, 3);
+        }
+      });
+
+      return next;
+    });
   }, [selectedComponentRows]);
+
+  const handleBatchAmountChange = (
+    component: VoucherComponentBreakdown,
+    componentKey: string,
+    remainingAmount: number,
+    rawValue: string
+  ) => {
+    if (rawValue.trim() === "") {
+      setBatchAmountsByComponentKey((prev) => ({ ...prev, [componentKey]: "" }));
+      setBatchReleasePercentByComponentKey((prev) => ({ ...prev, [componentKey]: "" }));
+      return;
+    }
+
+    const parsedAmount = Number(rawValue);
+
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      setBatchAmountsByComponentKey((prev) => ({ ...prev, [componentKey]: rawValue }));
+      return;
+    }
+
+    const cappedAmount = Math.min(parsedAmount, remainingAmount);
+    const nextReleasePercentage =
+      component.amount > 0 && component.percentage > 0
+        ? Number(((cappedAmount / component.amount) * component.percentage).toFixed(3))
+        : 0;
+
+    setBatchAmountsByComponentKey((prev) => ({
+      ...prev,
+      [componentKey]: formatEditableNumber(cappedAmount, 2),
+    }));
+    setBatchReleasePercentByComponentKey((prev) => ({
+      ...prev,
+      [componentKey]: formatEditableNumber(nextReleasePercentage, 3),
+    }));
+  };
+
+  const handleBatchReleasePercentChange = (
+    component: VoucherComponentBreakdown,
+    componentKey: string,
+    remainingAmount: number,
+    rawValue: string
+  ) => {
+    if (rawValue.trim() === "") {
+      setBatchReleasePercentByComponentKey((prev) => ({ ...prev, [componentKey]: "" }));
+      setBatchAmountsByComponentKey((prev) => ({ ...prev, [componentKey]: "" }));
+      return;
+    }
+
+    const parsedReleasePercentage = Number(rawValue);
+
+    if (!Number.isFinite(parsedReleasePercentage) || parsedReleasePercentage < 0) {
+      setBatchReleasePercentByComponentKey((prev) => ({ ...prev, [componentKey]: rawValue }));
+      return;
+    }
+
+    const maxReleasePercentage = getRemainingPercentage(component, remainingAmount);
+    const cappedReleasePercentage = Math.min(parsedReleasePercentage, maxReleasePercentage);
+    const nextAmount = getAmountFromReleasePercentage(component, cappedReleasePercentage, remainingAmount);
+
+    setBatchReleasePercentByComponentKey((prev) => ({
+      ...prev,
+      [componentKey]: formatEditableNumber(cappedReleasePercentage, 3),
+    }));
+    setBatchAmountsByComponentKey((prev) => ({
+      ...prev,
+      [componentKey]: formatEditableNumber(nextAmount, 2),
+    }));
+  };
 
   const selectedRows = useMemo(
     () =>
@@ -1050,6 +1231,11 @@ export function PaymentVoucherPage({
 
   const selectedMemberProfileId = selectedComponentRows[0]?.row.profileId ?? null;
   const selectedMemberName = selectedComponentRows[0]?.row.memberLabel ?? null;
+  const selectedMemberProfile = selectedMemberProfileId
+    ? profileMap.get(selectedMemberProfileId) ?? null
+    : null;
+  const selectedMemberBankName = selectedMemberProfile?.bank_name?.trim() ?? "";
+  const selectedMemberBankAccountNumber = selectedMemberProfile?.bank_account_number?.trim() ?? "";
 
   const historyRows = useMemo<VoucherHistoryDisplayRow[]>(
     () =>
@@ -1373,7 +1559,7 @@ export function PaymentVoucherPage({
     setSuccess(null);
     setDeductSst(false);
     setDeductWithholdingTax(false);
-    setVoucherIcNo("");
+    setVoucherIcNo(selectedMemberProfile?.ic_no ?? "");
     setVoucherRefNo("");
     setVoucherChequersNo("");
     setShowGenerateOptions(true);
@@ -1644,6 +1830,7 @@ export function PaymentVoucherPage({
       await fetchData();
       setSelectedComponentKeys([]);
       setBatchAmountsByComponentKey({});
+      setBatchReleasePercentByComponentKey({});
       setBatchRemarksByComponentKey({});
       setIsGenerating(false);
       setShowGenerateOptions(false);
@@ -1980,6 +2167,7 @@ export function PaymentVoucherPage({
                                   <th className="px-2 py-2">Commission %</th>
                                   <th className="px-2 py-2">Amount (RM)</th>
                                   <th className="px-2 py-2">Batch Amount (RM)</th>
+                                  <th className="px-2 py-2">Release %</th>
                                   <th className="px-2 py-2">Payment Remark</th>
                                 </tr>
                               </thead>
@@ -2035,16 +2223,26 @@ export function PaymentVoucherPage({
                                           min="0"
                                           step="0.01"
                                           value={batchAmountsByComponentKey[component.key] ?? ""}
-                                          onChange={(event) => {
-                                            setBatchAmountsByComponentKey((prev) => ({
-                                              ...prev,
-                                              [component.key]: event.target.value,
-                                            }));
-                                          }}
+                                          onChange={(event) => handleBatchAmountChange(component, component.key, remainingAmount, event.target.value)}
                                           disabled={!selectedComponentKeys.includes(component.key)}
-                                          placeholder="0.00"
+                                          placeholder="0"
                                           className="w-32 rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:bg-gray-100"
                                         />
+                                      </td>
+                                      <td className="px-2 py-2 text-gray-700">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.001"
+                                          value={batchReleasePercentByComponentKey[component.key] ?? ""}
+                                          onChange={(event) => handleBatchReleasePercentChange(component, component.key, remainingAmount, event.target.value)}
+                                          disabled={!selectedComponentKeys.includes(component.key)}
+                                          placeholder="0"
+                                          className="w-28 rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:bg-gray-100"
+                                        />
+                                        <div className="text-[11px] text-gray-500 mt-1">
+                                          Max {formatPercentage(getRemainingPercentage(component, remainingAmount))}
+                                        </div>
                                       </td>
                                       <td className="px-2 py-2 text-gray-700">
                                         <input
@@ -2200,6 +2398,16 @@ export function PaymentVoucherPage({
             <div className="space-y-3 px-5 py-4 text-sm text-gray-700">
               <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                 Selected member: <span className="font-semibold">{selectedMemberName || "-"}</span>
+                {selectedMemberBankName && (
+                  <div className="mt-1 text-xs text-gray-600">
+                    Bank Name: <span className="font-medium text-gray-700">{selectedMemberBankName}</span>
+                  </div>
+                )}
+                {selectedMemberBankAccountNumber && (
+                  <div className="text-xs text-gray-600">
+                    Bank Account Number: <span className="font-medium text-gray-700">{selectedMemberBankAccountNumber}</span>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">I/C No</label>

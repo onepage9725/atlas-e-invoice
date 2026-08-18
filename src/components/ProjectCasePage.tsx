@@ -155,7 +155,7 @@ export function ProjectCasePage() {
 
   const dateFilteredCases = useMemo(() => {
     return signedLoCases.filter((record) => {
-      const recordDate = toComparableDate(record.signed_lo_date ?? record.created_at ?? null);
+      const recordDate = toComparableDate(record.booking_date ?? record.signed_lo_date ?? record.created_at ?? null);
       if (!recordDate) {
         return false;
       }

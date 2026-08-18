@@ -679,13 +679,13 @@ export function FinancePage({ userId, role }: FinancePageProps) {
 
   const filteredCaseRows = useMemo(() => {
     return cases.filter((record) => {
-      const createdAt = getLocalDateValueFromTimestamp(record.created_at);
+      const caseDate = getLocalDateValueFromTimestamp(record.booking_date ?? record.created_at);
 
-      if (fromDate && createdAt < fromDate) {
+      if (fromDate && caseDate < fromDate) {
         return false;
       }
 
-      if (toDate && createdAt > toDate) {
+      if (toDate && caseDate > toDate) {
         return false;
       }
 
@@ -698,11 +698,6 @@ export function FinancePage({ userId, role }: FinancePageProps) {
   }, [cases, fromDate, selectedProjectId, toDate]);
 
   const totalMonthlyGdv = useMemo(
-    () => filteredCaseRows.reduce((sum, record) => sum + (record.spa_price ?? 0), 0),
-    [filteredCaseRows]
-  );
-
-  const totalMonthlySalesNett = useMemo(
     () => filteredCaseRows.reduce((sum, record) => sum + (record.nett_price ?? 0), 0),
     [filteredCaseRows]
   );
@@ -1172,11 +1167,6 @@ export function FinancePage({ userId, role }: FinancePageProps) {
         <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
           <p className="text-sm font-medium text-gray-500 mb-2">Total GDV</p>
           <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlyGdv)}</p>
-          <p className="text-xs text-gray-500 mt-2">Total SPA price from all cases within the selected date range.</p>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-sm font-medium text-gray-500 mb-2">Total Nett Sales</p>
-          <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlySalesNett)}</p>
           <p className="text-xs text-gray-500 mt-2">Total nett price from all cases within the selected date range.</p>
         </div>
         <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">

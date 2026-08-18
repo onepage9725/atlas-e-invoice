@@ -250,6 +250,8 @@ export function PayoutPage({
   userId: string;
   onNavigateToPaymentVoucher?: () => void;
 }) {
+  void onNavigateToPaymentVoucher;
+
   const [payouts, setPayouts] = useState<SalesCasePayoutRecord[]>([]);
   const [companyReceipts, setCompanyReceipts] = useState<FinanceEntryRecord[]>([]);
   const [cases, setCases] = useState<SalesCaseRecord[]>([]);
@@ -1049,51 +1051,6 @@ export function PayoutPage({
     setSuccess("1st commission approved and moved to Payment Voucher.");
   };
 
-  const handleApproveHoldingComm = async (salesCaseId: string) => {
-    setError(null);
-    setSuccess(null);
-    setIsUpdatingId(salesCaseId);
-
-    const targetRows = payouts.filter((row) => {
-      if (row.sales_case_id !== salesCaseId || row.payout_status !== "Pending") {
-        return false;
-      }
-
-      if (row.payout_type !== "tier_upgrade_top_up") {
-        return false;
-      }
-
-      const source = (row.source_commission_structure_id ?? "").toLowerCase();
-      const target = (row.target_commission_structure_id ?? "").toLowerCase();
-      const sourceLabel = (row.source_commission_structure_label ?? "").toLowerCase();
-      const targetLabel = (row.target_commission_structure_label ?? "").toLowerCase();
-
-      const sourceMatches = source === "holding_commission" || sourceLabel === "holding commission";
-      const targetMatches = target === "released" || targetLabel === "released";
-
-      return sourceMatches && targetMatches;
-    });
-
-    if (targetRows.length === 0) {
-      setError("No pending holding commission rows found for this case.");
-      setIsUpdatingId(null);
-      return;
-    }
-
-    const splitError = await splitPendingRowsByComponent(targetRows, "Approve");
-
-    if (splitError) {
-      setError(splitError.message);
-      setIsUpdatingId(null);
-      return;
-    }
-
-    await fetchData();
-    setIsUpdatingId(null);
-    setSuccess("Holding commission approved and moved to Payment Voucher.");
-    onNavigateToPaymentVoucher?.();
-  };
-
   const handleDeleteCase = async () => {
     if (!pendingDelete) {
       return;
@@ -1710,22 +1667,6 @@ export function PayoutPage({
                               {groupRejectTarget && isUpdatingId === groupRejectTarget.payout.sales_case_id
                                 ? "Approving..."
                                 : "Approve 1st Comm"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!groupRejectTarget) {
-                                  return;
-                                }
-
-                                void handleApproveHoldingComm(groupRejectTarget.payout.sales_case_id);
-                              }}
-                              disabled={!groupRejectTarget || isUpdatingId === groupRejectTarget.payout.sales_case_id}
-                              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-emerald-200 text-emerald-700 hover:text-emerald-800"
-                            >
-                              {groupRejectTarget && isUpdatingId === groupRejectTarget.payout.sales_case_id
-                                ? "Approving..."
-                                : "Approve Holding Comm"}
                             </button>
                             <button
                               type="button"

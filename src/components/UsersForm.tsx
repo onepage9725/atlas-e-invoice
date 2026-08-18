@@ -5,6 +5,7 @@ import { getMemberRankSummary, type MemberRankSummary, type RankCase, type RankP
 
 const roleOptions = ["super_admin", "admin", "leader", "agent"] as const;
 const createRoleOptions = ["super_admin", "admin", "agent"] as const;
+const adminCreateRoleOptions = ["agent", "admin"] as const;
 const memberRankOptions = ["agent", "pre_leader", "leader"] as const;
 
 const getDefaultMemberRankForRole = (role: string | null | undefined): (typeof memberRankOptions)[number] =>
@@ -13,6 +14,7 @@ const getDefaultMemberRankForRole = (role: string | null | undefined): (typeof m
 type UserProfile = RankProfile & {
   name: string | null;
   email: string | null;
+  ic_no: string | null;
   bank_name: string | null;
   bank_account_number: string | null;
   is_active: boolean | null;
@@ -83,6 +85,7 @@ export function UsersForm() {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [rankCases, setRankCases] = useState<RankCase[]>([]);
   const [rankPayouts, setRankPayouts] = useState<RankPayout[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [supportsGroupPoints, setSupportsGroupPoints] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -94,6 +97,7 @@ export function UsersForm() {
   const [editRecruitById, setEditRecruitById] = useState("");
   const [editPersonalPoints, setEditPersonalPoints] = useState("");
   const [editGroupPoints, setEditGroupPoints] = useState("");
+  const [editIcNo, setEditIcNo] = useState("");
   const [editBankName, setEditBankName] = useState("");
   const [editBankAccountNumber, setEditBankAccountNumber] = useState("");
   const [editAvatarX, setEditAvatarX] = useState(50);
@@ -110,6 +114,9 @@ export function UsersForm() {
 
   const shouldRequireRank = role === "agent";
   const shouldSelectRecruiter = role === "agent";
+  const availableCreateRoleOptions = currentUserRole === "super_admin"
+    ? createRoleOptions
+    : adminCreateRoleOptions;
 
   const profilesById = useMemo(() => {
     const map = new Map<string, UserProfile>();
@@ -266,6 +273,7 @@ export function UsersForm() {
       id: "draft-member",
       name: null,
       email: email || null,
+      ic_no: null,
       role,
       rank,
       recruit_by: shouldSelectRecruiter ? recruitById || null : null,
@@ -335,7 +343,7 @@ export function UsersForm() {
       supabase
         .from("profiles")
         .select(
-          "id, name, email, role, rank, recruit_by, personal_points, group_points, bank_name, bank_account_number, is_active, avatar_url, avatar_position_x, avatar_position_y, avatar_zoom"
+          "id, name, email, role, rank, recruit_by, personal_points, group_points, ic_no, bank_name, bank_account_number, is_active, avatar_url, avatar_position_x, avatar_position_y, avatar_zoom"
         )
         .is("deleted_at", null)
         .order("created_at", { ascending: false }),
@@ -348,7 +356,7 @@ export function UsersForm() {
     let profileData = profileResult.data as UserProfile[] | null;
 
     if (profileResult.error) {
-      const fallbackResult = await supabase
+      const fallbackWithoutIcOrGroup = await supabase
         .from("profiles")
         .select(
           "id, name, email, role, rank, recruit_by, personal_points, bank_name, bank_account_number, is_active, avatar_url, avatar_position_x, avatar_position_y, avatar_zoom"
@@ -356,16 +364,33 @@ export function UsersForm() {
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
-      if (fallbackResult.error) {
-        setError(fallbackResult.error.message);
-        return;
-      }
+      if (!fallbackWithoutIcOrGroup.error) {
+        profileData = (fallbackWithoutIcOrGroup.data ?? []).map((profile) => ({
+          ...(profile as UserProfile),
+          ic_no: null,
+          group_points: 0,
+        }));
+        setSupportsGroupPoints(false);
+      } else {
+        const fallbackWithoutGroup = await supabase
+          .from("profiles")
+          .select(
+            "id, name, email, role, rank, recruit_by, personal_points, ic_no, bank_name, bank_account_number, is_active, avatar_url, avatar_position_x, avatar_position_y, avatar_zoom"
+          )
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false });
 
-      profileData = (fallbackResult.data ?? []).map((profile) => ({
-        ...(profile as UserProfile),
-        group_points: 0,
-      }));
-      setSupportsGroupPoints(false);
+        if (fallbackWithoutGroup.error) {
+          setError(fallbackWithoutGroup.error.message);
+          return;
+        }
+
+        profileData = (fallbackWithoutGroup.data ?? []).map((profile) => ({
+          ...(profile as UserProfile),
+          group_points: 0,
+        }));
+        setSupportsGroupPoints(false);
+      }
     } else {
       setSupportsGroupPoints(true);
     }
@@ -399,6 +424,7 @@ export function UsersForm() {
     role: string | null;
     rank: string | null;
     recruit_by: string | null;
+    ic_no: string | null;
     bank_name: string | null;
     bank_account_number: string | null;
     avatar_position_x: number | null;
@@ -421,6 +447,7 @@ export function UsersForm() {
     setEditRecruitById(profile.recruit_by ?? "");
     setEditPersonalPoints((profile.personal_points ?? 0).toString());
     setEditGroupPoints((profile.group_points ?? 0).toString());
+    setEditIcNo(profile.ic_no ?? "");
     setEditBankName(profile.bank_name ?? "");
     setEditBankAccountNumber(profile.bank_account_number ?? "");
     setEditAvatarX(profile.avatar_position_x ?? 50);
@@ -441,6 +468,7 @@ export function UsersForm() {
     setEditRecruitById("");
     setEditPersonalPoints("");
     setEditGroupPoints("");
+    setEditIcNo("");
     setEditBankName("");
     setEditBankAccountNumber("");
     setEditAvatarX(50);
@@ -506,6 +534,7 @@ export function UsersForm() {
         recruit_by:
           editRole === "agent" || editRole === "leader" ? editRecruitById || null : null,
         personal_points: editRole === "agent" || editRole === "leader" ? parsedPersonalPoints : 0,
+        ic_no: editIcNo || null,
         bank_name: editBankName || null,
         bank_account_number: editBankAccountNumber || null,
         avatar_url: newUrl,
@@ -542,6 +571,7 @@ export function UsersForm() {
       if (newUrl && oldUrl && newUrl !== oldUrl) {
         await deleteAvatarFromStorage(oldUrl);
       }
+      cancelEditing();
       setIsSavingProfile(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Upload failed.";
@@ -651,6 +681,44 @@ export function UsersForm() {
   useEffect(() => {
     fetchProfiles();
   }, []);
+
+  useEffect(() => {
+    const loadCurrentUserRole = async () => {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+
+      if (authError) {
+        return;
+      }
+
+      const authUserId = authData.user?.id;
+
+      if (!authUserId) {
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authUserId)
+        .maybeSingle();
+
+      if (profileError) {
+        return;
+      }
+
+      setCurrentUserRole(profile?.role ?? null);
+    };
+
+    loadCurrentUserRole();
+  }, []);
+
+  useEffect(() => {
+    if (!availableCreateRoleOptions.some((option) => option === role)) {
+      setRole("agent");
+      setRank(getDefaultMemberRankForRole("agent"));
+      setRecruitById("");
+    }
+  }, [availableCreateRoleOptions, role]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -865,7 +933,7 @@ export function UsersForm() {
                 }}
                 className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none bg-white"
               >
-                {createRoleOptions.map((option) => (
+                {availableCreateRoleOptions.map((option) => (
                   <option key={option} value={option}>
                     {option.replace("_", " ")}
                   </option>
@@ -1304,6 +1372,16 @@ export function UsersForm() {
                     <p className="mt-1 text-xs text-gray-500">Can be set for any role.</p>
                   </div>
                 )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">I/C No</label>
+                  <input
+                    type="text"
+                    value={editIcNo}
+                    onChange={(event) => setEditIcNo(event.target.value)}
+                    placeholder="I/C number"
+                    className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
                   <input

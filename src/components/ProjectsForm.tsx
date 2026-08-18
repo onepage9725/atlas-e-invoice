@@ -273,7 +273,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
   const previewUrlRef = useRef<string | null>(null);
 
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
-  const canManageProjects = role === "admin" || role === "super_admin";
+  const canManageProjects = role === "super_admin";
   const canManageMultipleStructures = role === "super_admin";
   const canViewCampaign = role === "super_admin";
   const canDeleteProjects = role === "super_admin";

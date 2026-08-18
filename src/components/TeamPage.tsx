@@ -1061,7 +1061,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
           (sum, payout) => (downlineIdSet.has(payout.profile_id) ? sum + Number(payout.total_amount ?? 0) : sum),
           0
         );
-        const personalGdv = getCasePersonalAmountForProfiles(record, record.spa_price ?? 0, downlineIdSet);
+        const personalGdv = getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, downlineIdSet);
         const personalSalesConverted = displayStatus === "Completed"
           ? getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, downlineIdSet)
           : 0;
@@ -1143,7 +1143,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
           (sum, payout) => (teamIdSet.has(payout.profile_id) ? sum + Number(payout.total_amount ?? 0) : sum),
           0
         );
-        const personalGdv = getCasePersonalAmountForProfiles(record, record.spa_price ?? 0, teamIdSet);
+        const personalGdv = getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, teamIdSet);
         const personalSalesConverted = displayStatus === "Completed"
           ? getCasePersonalAmountForProfiles(record, record.nett_price ?? 0, teamIdSet)
           : 0;
@@ -1191,8 +1191,8 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
     const yearValues = new Set<string>([selectedYearValue, `${today.getFullYear()}`]);
 
     teamCaseRows.forEach((item) => {
-      if (item.createdAt) {
-        yearValues.add(`${item.createdAt.getFullYear()}`);
+      if (item.bookingMonthValue) {
+        yearValues.add(item.bookingMonthValue.slice(0, 4));
       }
     });
 
@@ -1217,7 +1217,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
 
   const filteredTeamCaseRows = useMemo(() => {
     return teamCaseRows.filter((item) => {
-      if (selectedMonth && getDateMonthValue(item.createdAt) !== selectedMonth) {
+      if (selectedMonth && item.bookingMonthValue !== selectedMonth) {
         return false;
       }
 
@@ -1254,7 +1254,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
 
   const filteredSummaryCaseRows = useMemo(() => {
     return summaryCaseRows.filter((item) => {
-      if (selectedMonth && getDateMonthValue(item.createdAt) !== selectedMonth) {
+      if (selectedMonth && item.bookingMonthValue !== selectedMonth) {
         return false;
       }
 
@@ -1286,8 +1286,8 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
         return true;
       }
 
-      const caseCreatedAt = record.created_at ? new Date(record.created_at) : null;
-      return getDateMonthValue(caseCreatedAt) === selectedMonth;
+      const caseDateForFilter = record.booking_date ? new Date(record.booking_date) : (record.created_at ? new Date(record.created_at) : null);
+      return getDateMonthValue(caseDateForFilter) === selectedMonth;
     });
 
     const directTotal = matchingCaseRows.reduce((sum, record) => {
@@ -1366,8 +1366,8 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
           return true;
         }
 
-        const caseCreatedAt = record.created_at ? new Date(record.created_at) : null;
-        return getDateMonthValue(caseCreatedAt) === selectedMonth;
+        const caseDateForFilter = record.booking_date ? new Date(record.booking_date) : (record.created_at ? new Date(record.created_at) : null);
+        return getDateMonthValue(caseDateForFilter) === selectedMonth;
       };
 
       const isPayoutInCurrentMonth = (payout: SalesCasePayoutRecord) => {
@@ -1648,7 +1648,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
         <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
           <p className="mb-2 text-sm font-medium text-gray-500">Team GDV of the Month</p>
           <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalTeamMonthlyGDV)}</p>
-          <p className="mt-2 text-xs text-gray-500">Team personal GDV for the selected month, using the split share for involved salespeople.</p>
+          <p className="mt-2 text-xs text-gray-500">Team nett price total for the selected month, using the split share for involved salespeople.</p>
         </div>
         {!shouldHideConvertedOverviewCards && (
           <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
