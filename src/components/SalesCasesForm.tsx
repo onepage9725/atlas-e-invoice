@@ -11,6 +11,7 @@ import {
 import { getCasePersonalAmountForProfile, getStoredInvolvedProfileId } from "../lib/salesCaseMetrics";
 import { buildCommissionStructureByTotalPercentage } from "../lib/salesCasePayouts";
 import {
+  MEMBER_SIGNED_SPA_OPTIONS,
   getCaseStatusClasses,
   hasCaseWorkflowColumns,
   isCaseLockedForEditing,
@@ -1168,11 +1169,30 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                 const isPersonallyRelatedCase =
                   row.rowType === "direct" &&
                   (isCreator || getStoredInvolvedProfileId(record) === userId);
+                const signedSpaStatus = (record.signed_spa_status ?? "").trim();
+                const signedSpaRowHighlightClass =
+                  signedSpaStatus === "Submit"
+                    ? "bg-amber-50"
+                    : signedSpaStatus === "Complete"
+                      ? "bg-emerald-50"
+                      : signedSpaStatus === "Reject"
+                        ? "bg-red-50"
+                        : "";
+                const signedSpaBadgeClass =
+                  signedSpaStatus === "Submit"
+                    ? "border-amber-200 bg-amber-100 text-amber-800"
+                    : signedSpaStatus === "Complete"
+                      ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                      : signedSpaStatus === "Reject"
+                        ? "border-red-200 bg-red-100 text-red-800"
+                        : "border-slate-200 bg-slate-100 text-slate-700";
+                const rowBackgroundClass =
+                  signedSpaRowHighlightClass || (isPersonallyRelatedCase ? "bg-blue-50/60" : "bg-white");
 
                 return (
                   <tr
                     key={row.id}
-                    className={`border-b border-gray-50 ${isPersonallyRelatedCase ? "bg-blue-50/60" : "bg-white"}`}
+                    className={`border-b border-gray-50 ${rowBackgroundClass}`}
                   >
                     <td className="px-6 py-3 text-gray-600">
                       {row.rowType === "top_up" ? new Date(row.createdAt).toLocaleDateString() : createdAt ? createdAt.toLocaleDateString() : "-"}
@@ -1208,6 +1228,11 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                       >
                         {displayStatus}
                       </span>
+                      <div className="mt-1">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${signedSpaBadgeClass}`}>
+                          Signed SPA: {signedSpaStatus || "None"}
+                        </span>
+                      </div>
                       {(topUpPayout
                         ? Boolean(topUpPayout.payment_receipt_url && topUpPayout.payout_status === "Paid")
                         : Boolean(viewerPayout?.payment_receipt_url && viewerPayout.payout_status === "Paid")) && (
@@ -1293,6 +1318,8 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
           enableWorkflowFields={caseWorkflowEnabled}
           allowStatusEdit={caseWorkflowEnabled && !isReadOnlyModal}
           allowLoDraftUpload={caseWorkflowEnabled && !isReadOnlyModal}
+          signedSpaOptions={MEMBER_SIGNED_SPA_OPTIONS}
+          lockSignedSpaWhenComplete
           onClose={() => {
             setIsModalOpen(false);
             setIsReadOnlyModal(false);

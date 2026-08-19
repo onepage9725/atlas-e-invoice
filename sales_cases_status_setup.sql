@@ -12,7 +12,9 @@ alter table public.sales_cases
   add column if not exists emergency_contact_email text,
   add column if not exists involved_profile_id uuid,
   add column if not exists status text not null default 'Pending',
+  add column if not exists signed_spa_status text not null default 'None',
   add column if not exists lo_draft_url text,
+  add column if not exists signed_spa_url text,
   add column if not exists signed_lo_date date,
   add column if not exists commission_structure jsonb,
   add column if not exists commission_review_sent_at timestamptz,
@@ -91,20 +93,14 @@ create unique index if not exists sales_case_payouts_tier_upgrade_top_up_unique_
   where payout_type = 'tier_upgrade_top_up';
 
 update public.sales_cases
-set involved_profile_id = (
-  select profile_id
-  from unnest(coalesce(involved_user_ids, '{}'::uuid[])) as profile_id
-  where profile_id <> created_by
-  group by profile_id
-  having count(*) = 1
-  limit 1
-)
-where involved_profile_id is null
-  and (
-    select count(*)
-    from unnest(coalesce(involved_user_ids, '{}'::uuid[])) as profile_id
-    where profile_id <> created_by
-  ) = 1;
+set involved_profile_id = null
+where involved_profile_id is not null
+  and involved_profile_id = created_by;
+
+update public.sales_cases
+set involved_user_ids = array_remove(array[created_by, involved_profile_id]::uuid[], null)
+where coalesce(involved_user_ids, '{}'::uuid[])
+  is distinct from array_remove(array[created_by, involved_profile_id]::uuid[], null);
 
 alter table public.sales_cases
   alter column booking_date set default current_date;
@@ -117,12 +113,23 @@ update public.sales_cases
 set status = 'Pending'
 where status is null;
 
+update public.sales_cases
+set signed_spa_status = 'None'
+where signed_spa_status is null;
+
 alter table public.sales_cases
   drop constraint if exists sales_cases_status_check;
 
 alter table public.sales_cases
   add constraint sales_cases_status_check
   check (status in ('Pending', 'Signed LO', 'Cancel', 'Claimable', 'Approve', 'Paid', 'Reject'));
+
+alter table public.sales_cases
+  drop constraint if exists sales_cases_signed_spa_status_check;
+
+alter table public.sales_cases
+  add constraint sales_cases_signed_spa_status_check
+  check (signed_spa_status in ('None', 'Submit', 'Complete', 'Reject'));
 
 drop policy if exists sales_cases_insert_creator on public.sales_cases;
 create policy sales_cases_insert_creator
@@ -787,7 +794,9 @@ returns table (
   customer_ic_url text,
   booking_receipt_url text,
   lo_draft_url text,
+  signed_spa_url text,
   signed_lo_date date,
+  signed_spa_status text,
   commission_structure jsonb,
   status text,
   created_by uuid,
@@ -826,7 +835,9 @@ as $$
     sales_cases.customer_ic_url,
     sales_cases.booking_receipt_url,
     sales_cases.lo_draft_url,
+    sales_cases.signed_spa_url,
     sales_cases.signed_lo_date,
+    sales_cases.signed_spa_status,
     sales_cases.commission_structure,
     sales_cases.status,
     sales_cases.created_by,

@@ -1458,7 +1458,7 @@ export function PaymentVoucherPage({
 
     rowsForPdf.forEach((row, index) => {
       const claimHeading = getVoucherClaimHeading(row);
-      const itemBlockHeight = 62;
+      const itemBlockHeight = 46;
       const isLastRow = index === rowsForPdf.length - 1;
       const requiredHeight = itemBlockHeight + (isLastRow ? summaryBlockHeight + 8 : 0);
 
@@ -1475,26 +1475,28 @@ export function PaymentVoucherPage({
 
       const shouldRenderHeading = claimHeading !== previousHeading;
 
-      const descriptionStartY = currentY;
-      const amountRowY = currentY + 10;
-      const indexY = currentY + 18;
+      const firstLineY = currentY;
+      const secondLineY = currentY + 14;
+      const thirdLineY = currentY + 28;
+      const projectLineY = shouldRenderHeading ? secondLineY : firstLineY;
+      const nettPriceY = shouldRenderHeading ? thirdLineY : secondLineY;
 
-      doc.text(String(index + 1), (col.x0 + col.x1) / 2, indexY, { align: "center" });
+      doc.text(String(index + 1), (col.x0 + col.x1) / 2, firstLineY, { align: "center" });
 
       if (shouldRenderHeading) {
         doc.setFont("helvetica", "bold");
-        doc.text(claimHeading, col.x1 + 8, descriptionStartY);
+        doc.text(claimHeading, col.x1 + 8, firstLineY);
       }
 
       doc.setFont("helvetica", "normal");
-      doc.text(`${row.projectName} ${row.unitLabel}`, col.x1 + 8, descriptionStartY + 20);
+      doc.text(`${row.projectName} ${row.unitLabel}`, col.x1 + 8, projectLineY);
 
       const nettPriceLabel = row.nettPrice !== null ? `RM ${formatAmount(row.nettPrice)}` : "-";
-      doc.text(`Net purchase price: ${nettPriceLabel}`, col.x1 + 8, descriptionStartY + 40);
+      doc.text(`Net purchase price: ${nettPriceLabel}`, col.x1 + 8, nettPriceY);
 
-      doc.text("1", (col.x2 + col.x3) / 2, amountRowY, { align: "center" });
-      doc.text(formatPercentage(row.commissionPercentage), (col.x3 + col.x4) / 2, amountRowY, { align: "center" });
-      doc.text(`RM ${formatAmount(row.amount)}`, col.x5 - 8, amountRowY, { align: "right" });
+      doc.text("1", (col.x2 + col.x3) / 2, firstLineY, { align: "center" });
+      doc.text(formatPercentage(row.commissionPercentage), (col.x3 + col.x4) / 2, firstLineY, { align: "center" });
+      doc.text(`RM ${formatAmount(row.amount)}`, col.x5 - 8, firstLineY, { align: "right" });
 
       currentY += itemBlockHeight;
       previousHeading = claimHeading;

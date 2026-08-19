@@ -13,6 +13,7 @@ import {
   getCaseStatusClasses,
   hasCaseWorkflowColumns,
   isCaseLockedForEditing,
+  MANAGE_SIGNED_SPA_OPTIONS,
   MANAGE_CASE_STATUS_OPTIONS,
   normalizeCaseStatus,
   SalesCaseModal,
@@ -114,6 +115,23 @@ const formatAmount = (value: number | null) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
+};
+
+const getNettPriceRemark = (record: SalesCaseRecord, project: ProjectOption | null) => {
+  const nettPrice = record.nett_price;
+
+  if (nettPrice === null || Number.isNaN(nettPrice)) {
+    return "Nett unavailable";
+  }
+
+  const commissionStructure = getCaseCommissionStructure(record, project);
+  const totalCommissionPercentage =
+    (commissionStructure?.agent_commission ?? 0) +
+    (commissionStructure?.pre_leader_override ?? 0) +
+    (commissionStructure?.leader_override ?? 0);
+  const totalCommissionAmount = nettPrice * (totalCommissionPercentage / 100);
+
+  return `Total comm: RM ${formatAmount(totalCommissionAmount)}`;
 };
 
 export function ManageCases({ userId }: ManageCasesProps) {
@@ -596,6 +614,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
           record.customer_ic_url,
           record.booking_receipt_url,
           record.lo_draft_url,
+          record.signed_spa_url,
         ].filter(Boolean))
       ) as string[];
 
@@ -626,7 +645,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
         console.error("Failed to create delete notifications for sales case", notificationError);
       }
 
-      setSuccess("Sales case deleted successfully, including booking form, customer I/C, booking receipt, and LO draft attachments.");
+      setSuccess("Sales case deleted successfully, including booking form, customer I/C, booking receipt, LO draft, and signed SPA attachments.");
       await fetchCases();
       setIsDeleting(false);
       setPendingDelete(null);
@@ -922,9 +941,28 @@ export function ManageCases({ userId }: ManageCasesProps) {
                 );
                 const allRelatedPaid = relatedPayouts.length > 0 && relatedPayouts.every((payout) => payout.payout_status === "Paid");
                 const displayStatus = allRelatedPaid ? "Completed" : status;
+                const nettPriceRemark = getNettPriceRemark(record, project);
+                const signedSpaStatus = (record.signed_spa_status ?? "").trim();
+                const signedSpaRowHighlightClass =
+                  signedSpaStatus === "Submit"
+                    ? "bg-amber-50"
+                    : signedSpaStatus === "Complete"
+                      ? "bg-emerald-50"
+                      : signedSpaStatus === "Reject"
+                        ? "bg-red-50"
+                        : "";
+                const signedSpaBadgeClass =
+                  signedSpaStatus === "Submit"
+                    ? "border-amber-200 bg-amber-100 text-amber-800"
+                    : signedSpaStatus === "Complete"
+                      ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                      : signedSpaStatus === "Reject"
+                        ? "border-red-200 bg-red-100 text-red-800"
+                        : "border-slate-200 bg-slate-100 text-slate-700";
+                const rowBackgroundClass = signedSpaRowHighlightClass || "bg-white";
 
                 return (
-                  <tr key={record.id} className="border-b border-gray-50">
+                  <tr key={record.id} className={`border-b border-gray-50 ${rowBackgroundClass}`}>
                     <td className="px-6 py-3 text-gray-600">
                       {createdAt ? createdAt.toLocaleDateString() : "-"}
                     </td>
@@ -936,7 +974,10 @@ export function ManageCases({ userId }: ManageCasesProps) {
                       <div className="text-xs text-gray-500">{record.unit_number ? `Unit ${record.unit_number}` : "Unit -"}</div>
                     </td>
                     <td className="px-6 py-3 text-gray-600">{formatAmount(record.spa_price)}</td>
-                    <td className="px-6 py-3 text-gray-600">{formatAmount(record.nett_price)}</td>
+                    <td className="px-6 py-3 text-gray-600">
+                      <div>{formatAmount(record.nett_price)}</div>
+                      <div className="text-xs text-gray-500">{nettPriceRemark}</div>
+                    </td>
                     <td className="px-6 py-3 text-gray-600">{creator}</td>
                     <td className="px-6 py-3 text-gray-600">
                       {record.booking_form_url ? (
@@ -958,6 +999,11 @@ export function ManageCases({ userId }: ManageCasesProps) {
                       >
                         {displayStatus}
                       </span>
+                      <div className="mt-1">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${signedSpaBadgeClass}`}>
+                          Signed SPA: {signedSpaStatus || "None"}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-6 py-3 text-gray-600">
                       {record.delete_requested ? (
@@ -1059,6 +1105,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
           enableWorkflowFields={caseWorkflowEnabled}
           allowStatusEdit={caseWorkflowEnabled && !isReadOnlyModal}
           allowLoDraftUpload={caseWorkflowEnabled && !isReadOnlyModal}
+          signedSpaOptions={MANAGE_SIGNED_SPA_OPTIONS}
           statusOptions={MANAGE_CASE_STATUS_OPTIONS}
           paidReceiptRows={selectedCasePaidReceiptRows}
           onDelete={editingCase ? () => setPendingDelete(editingCase) : undefined}

@@ -48,6 +48,44 @@ export type SalesCaseStatus =
   | (typeof ADMIN_CASE_STATUS_OPTIONS)[number]
   | (typeof DISPLAY_ONLY_CASE_STATUS_OPTIONS)[number];
 
+export const MEMBER_SIGNED_SPA_OPTIONS = ["None", "Submit"] as const;
+export const ADMIN_SIGNED_SPA_OPTIONS = ["Complete", "Reject"] as const;
+export const MANAGE_SIGNED_SPA_OPTIONS = ["None", "Submit", "Complete", "Reject"] as const;
+
+export type SignedSpaStatus =
+  | (typeof MEMBER_SIGNED_SPA_OPTIONS)[number]
+  | (typeof ADMIN_SIGNED_SPA_OPTIONS)[number];
+
+const normalizeSignedSpaStatus = (
+  value: string | null | undefined,
+  fallback: SignedSpaStatus = "None"
+): SignedSpaStatus => {
+  const normalizedValue = (value ?? "").trim();
+  const validOptions = new Set<string>([
+    ...MEMBER_SIGNED_SPA_OPTIONS,
+    ...ADMIN_SIGNED_SPA_OPTIONS,
+  ]);
+
+  return validOptions.has(normalizedValue)
+    ? (normalizedValue as SignedSpaStatus)
+    : fallback;
+};
+
+const getScopedSignedSpaStatus = (
+  value: string | null | undefined,
+  options: readonly SignedSpaStatus[],
+  fallback: SignedSpaStatus = "None"
+): SignedSpaStatus => {
+  const normalized = normalizeSignedSpaStatus(value, fallback);
+  const optionSet = new Set<string>(options);
+
+  if (optionSet.has(normalized)) {
+    return normalized;
+  }
+
+  return optionSet.has(fallback) ? fallback : "None";
+};
+
 export const normalizeCaseStatus = (status: string | null | undefined): SalesCaseStatus => {
   const validStatuses = new Set<string>([
     ...CREATOR_CASE_STATUS_OPTIONS,
@@ -92,6 +130,13 @@ type StatusSelectProps = {
   value: SalesCaseStatus;
   options: readonly SalesCaseStatus[];
   onChange: (status: SalesCaseStatus) => void;
+};
+
+type SignedSpaSelectProps = {
+  value: SignedSpaStatus;
+  options: readonly SignedSpaStatus[];
+  onChange: (status: SignedSpaStatus) => void;
+  disabled?: boolean;
 };
 
 function StatusSelect({ value, options, onChange }: StatusSelectProps) {
@@ -163,6 +208,107 @@ function StatusSelect({ value, options, onChange }: StatusSelectProps) {
                   setIsOpen(false);
                 }}
                 className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm font-medium transition hover:opacity-90 ${getCaseStatusClasses(statusOption)}`}
+              >
+                <span>{statusOption}</span>
+                {isSelected ? <Check className="h-4 w-4" aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const getSignedSpaStatusClasses = (status: SignedSpaStatus) => {
+  switch (status) {
+    case "Submit":
+      return "bg-blue-50 text-blue-700 border-blue-100";
+    case "Complete":
+      return "bg-emerald-50 text-emerald-700 border-emerald-100";
+    case "Reject":
+      return "bg-red-50 text-red-700 border-red-100";
+    default:
+      return "bg-slate-50 text-slate-700 border-slate-100";
+  }
+};
+
+function SignedSpaSelect({ value, options, onChange, disabled = false }: SignedSpaSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const selectedStatus = getScopedSignedSpaStatus(value, options, "None");
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (containerRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (disabled) {
+            return;
+          }
+
+          setIsOpen((prev) => !prev);
+        }}
+        disabled={disabled}
+        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-medium shadow-sm transition focus:outline-none focus:ring-1 focus:ring-primary ${getSignedSpaStatusClasses(selectedStatus)} ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
+      >
+        <span>{selectedStatus}</span>
+        <ChevronDown
+          className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {isOpen && !disabled && (
+        <div
+          role="listbox"
+          aria-label="Signed SPA"
+          className="absolute z-20 mt-2 w-full space-y-2 rounded-xl border border-gray-200 bg-white p-2 shadow-lg"
+        >
+          {options.map((statusOption) => {
+            const isSelected = statusOption === selectedStatus;
+
+            return (
+              <button
+                key={statusOption}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => {
+                  onChange(statusOption);
+                  setIsOpen(false);
+                }}
+                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-sm font-medium transition hover:opacity-90 ${getSignedSpaStatusClasses(statusOption)}`}
               >
                 <span>{statusOption}</span>
                 {isSelected ? <Check className="h-4 w-4" aria-hidden="true" /> : null}
@@ -247,7 +393,9 @@ export type SalesCaseRecord = {
   customer_ic_url: string | null;
   booking_receipt_url: string | null;
   lo_draft_url: string | null;
+  signed_spa_url: string | null;
   signed_lo_date: string | null;
+  signed_spa_status: SignedSpaStatus | null;
   commission_structure: CommissionStructure | null;
   status: SalesCaseStatus | null;
   created_by: string | null;
@@ -271,6 +419,7 @@ type CustomerDetail = {
   contactNumber: string;
   email: string;
   address: string;
+  icUrl: string;
 };
 
 type SalesCaseModalProps = {
@@ -282,6 +431,8 @@ type SalesCaseModalProps = {
   enableWorkflowFields?: boolean;
   allowStatusEdit?: boolean;
   allowLoDraftUpload?: boolean;
+  signedSpaOptions?: readonly SignedSpaStatus[];
+  lockSignedSpaWhenComplete?: boolean;
   statusOptions?: readonly SalesCaseStatus[];
   paidReceiptRows?: Array<{
     id: string;
@@ -311,6 +462,7 @@ const createEmptyCustomerDetail = (): CustomerDetail => ({
   contactNumber: "",
   email: "",
   address: "",
+  icUrl: "",
 });
 
 const normalizeCustomerDetails = (value: unknown): CustomerDetail[] => {
@@ -333,6 +485,7 @@ const normalizeCustomerDetails = (value: unknown): CustomerDetail[] => {
           typeof typedItem.contactNumber === "string" ? typedItem.contactNumber : "",
         email: typeof typedItem.email === "string" ? typedItem.email : "",
         address: typeof typedItem.address === "string" ? typedItem.address : "",
+        icUrl: typeof typedItem.icUrl === "string" ? typedItem.icUrl : "",
       };
     })
     .filter((item): item is CustomerDetail => Boolean(item));
@@ -346,6 +499,7 @@ const sanitizeCustomerDetails = (customers: CustomerDetail[]) =>
       contactNumber: customer.contactNumber.trim(),
       email: customer.email.trim(),
       address: customer.address.trim(),
+      icUrl: customer.icUrl.trim(),
     }))
     .filter(
       (customer) =>
@@ -353,7 +507,8 @@ const sanitizeCustomerDetails = (customers: CustomerDetail[]) =>
         customer.id ||
         customer.contactNumber ||
         customer.email ||
-        customer.address
+        customer.address ||
+        customer.icUrl
     );
 
 const getInitialCustomerDetails = (record: SalesCaseRecord | null): CustomerDetail[] => {
@@ -364,6 +519,10 @@ const getInitialCustomerDetails = (record: SalesCaseRecord | null): CustomerDeta
   const fromJson = normalizeCustomerDetails(record.customer_details);
 
   if (fromJson.length > 0) {
+    if (!fromJson[0].icUrl && record.customer_ic_url) {
+      fromJson[0].icUrl = record.customer_ic_url;
+    }
+
     return fromJson;
   }
 
@@ -374,6 +533,7 @@ const getInitialCustomerDetails = (record: SalesCaseRecord | null): CustomerDeta
       contactNumber: record.customer_contact_number ?? "",
       email: record.customer_email ?? "",
       address: record.customer_address ?? "",
+      icUrl: record.customer_ic_url ?? "",
     },
   ];
 };
@@ -400,6 +560,8 @@ const createEmptyForm = () => ({
   customerIcName: "",
   bookingReceiptName: "",
   status: "Pending" as SalesCaseStatus,
+  signedSpaStatus: "None" as SignedSpaStatus,
+  signedSpaName: "",
   loDraftName: "",
   signedLoDate: "",
 });
@@ -413,7 +575,7 @@ function toNumberOrNull(value: string) {
 }
 
 const shouldRetryWithoutExtendedContactColumns = (message: string) =>
-  /Could not find the 'customer_address' column|Could not find the 'customer_details' column|Could not find the 'customer_ic_url' column|Could not find the 'booking_receipt_url' column|Could not find the 'emergency_contact_|Could not find the 'signed_lo_date' column/i.test(message);
+  /Could not find the 'customer_address' column|Could not find the 'customer_details' column|Could not find the 'customer_ic_url' column|Could not find the 'booking_receipt_url' column|Could not find the 'emergency_contact_|Could not find the 'signed_spa_url' column|Could not find the 'signed_lo_date' column|Could not find the 'signed_spa_status' column/i.test(message);
 
 const isRowLevelSecurityError = (message: string) =>
   /row-level security policy|violates row-level security|new row violates row-level security/i.test(message);
@@ -429,7 +591,9 @@ const stripExtendedContactColumns = <T extends Record<string, unknown>>(payload:
     emergency_contact_ic_passport,
     emergency_contact_number,
     emergency_contact_email,
+    signed_spa_url,
     signed_lo_date,
+    signed_spa_status,
     ...legacyPayload
   } = payload;
 
@@ -442,7 +606,9 @@ const stripExtendedContactColumns = <T extends Record<string, unknown>>(payload:
   void emergency_contact_ic_passport;
   void emergency_contact_number;
   void emergency_contact_email;
+  void signed_spa_url;
   void signed_lo_date;
+  void signed_spa_status;
 
   return legacyPayload;
 };
@@ -456,6 +622,8 @@ export function SalesCaseModal({
   enableWorkflowFields = true,
   allowStatusEdit = true,
   allowLoDraftUpload = true,
+  signedSpaOptions,
+  lockSignedSpaWhenComplete = false,
   statusOptions = CREATOR_CASE_STATUS_OPTIONS,
   paidReceiptRows = [],
   onDelete,
@@ -466,15 +634,20 @@ export function SalesCaseModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bookingFormFile, setBookingFormFile] = useState<File | null>(null);
-  const [customerIcFile, setCustomerIcFile] = useState<File | null>(null);
+  const [customerIcFiles, setCustomerIcFiles] = useState<Array<File | null>>([]);
   const [bookingReceiptFile, setBookingReceiptFile] = useState<File | null>(null);
   const [loDraftFile, setLoDraftFile] = useState<File | null>(null);
+  const [signedSpaFile, setSignedSpaFile] = useState<File | null>(null);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
 
   const isEditing = Boolean(initialCase);
   const isReadOnly = readOnly && isEditing;
   const showWorkflowFields = enableWorkflowFields && isEditing;
   const currentStatus = normalizeCaseStatus(initialCase?.status);
+  const isSignedSpaLocked =
+    lockSignedSpaWhenComplete &&
+    isEditing &&
+    normalizeSignedSpaStatus(initialCase?.signed_spa_status, "None") === "Complete";
 
   useEffect(() => {
     const fetchProfiles = async () => {
@@ -501,13 +674,24 @@ export function SalesCaseModal({
     return map;
   }, [profiles]);
 
+  const currentUserRole = (profilesById.get(userId)?.role ?? "").toLowerCase();
+  const isAdminRole = currentUserRole === "admin" || currentUserRole === "super_admin";
+  const effectiveSignedSpaOptions = useMemo<readonly SignedSpaStatus[]>(() => {
+    if (signedSpaOptions && signedSpaOptions.length > 0) {
+      return signedSpaOptions;
+    }
+
+    return isAdminRole ? MANAGE_SIGNED_SPA_OPTIONS : MEMBER_SIGNED_SPA_OPTIONS;
+  }, [isAdminRole, signedSpaOptions]);
+
   useEffect(() => {
     if (!initialCase) {
       setFormData(createEmptyForm());
       setBookingFormFile(null);
-      setCustomerIcFile(null);
+      setCustomerIcFiles([null]);
       setBookingReceiptFile(null);
       setLoDraftFile(null);
+      setSignedSpaFile(null);
       return;
     }
 
@@ -543,16 +727,39 @@ export function SalesCaseModal({
         ? initialCase.booking_receipt_url.split("/").pop() ?? ""
         : "",
       status: normalizeCaseStatus(initialCase.status),
+      signedSpaStatus: isSignedSpaLocked
+        ? "Complete"
+        : getScopedSignedSpaStatus(initialCase.signed_spa_status, effectiveSignedSpaOptions, "None"),
+      signedSpaName: initialCase.signed_spa_url
+        ? initialCase.signed_spa_url.split("/").pop() ?? ""
+        : "",
       loDraftName: initialCase.lo_draft_url
         ? initialCase.lo_draft_url.split("/").pop() ?? ""
         : "",
       signedLoDate: initialCase.signed_lo_date ?? "",
     });
     setBookingFormFile(null);
-    setCustomerIcFile(null);
+    setCustomerIcFiles(Array(getInitialCustomerDetails(initialCase).length).fill(null));
     setBookingReceiptFile(null);
     setLoDraftFile(null);
-  }, [initialCase]);
+    setSignedSpaFile(null);
+  }, [effectiveSignedSpaOptions, initialCase, isSignedSpaLocked]);
+
+  useEffect(() => {
+    setCustomerIcFiles((prev) => {
+      const targetLength = formData.customers.length;
+
+      if (prev.length === targetLength) {
+        return prev;
+      }
+
+      if (prev.length > targetLength) {
+        return prev.slice(0, targetLength);
+      }
+
+      return [...prev, ...Array(targetLength - prev.length).fill(null)];
+    });
+  }, [formData.customers.length]);
 
   const caseOwnerId = initialCase?.created_by ?? (allowCaseOwnerSelection ? formData.caseOwnerId : userId);
   const creatorProfile = caseOwnerId ? profilesById.get(caseOwnerId) ?? null : null;
@@ -804,10 +1011,20 @@ export function SalesCaseModal({
     setFormData((prev) => ({ ...prev, loDraftName: file ? file.name : prev.loDraftName }));
   };
 
-  const handleCustomerIcChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSignedSpaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
-    setCustomerIcFile(file);
-    setFormData((prev) => ({ ...prev, customerIcName: file ? file.name : "" }));
+    setSignedSpaFile(file);
+    setFormData((prev) => ({ ...prev, signedSpaName: file ? file.name : prev.signedSpaName }));
+  };
+
+  const handleCustomerIcChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+
+    setCustomerIcFiles((prev) => {
+      const next = [...prev];
+      next[index] = file;
+      return next;
+    });
   };
 
   const handleBookingReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -861,12 +1078,13 @@ export function SalesCaseModal({
     return data.publicUrl;
   };
 
-  const uploadCustomerIc = async () => {
-    if (!customerIcFile) return initialCase?.customer_ic_url ?? null;
-    const filePath = `${userId}/${Date.now()}-${sanitizeFileName(customerIcFile.name)}`;
+  const uploadSignedSpa = async () => {
+    if (!enableWorkflowFields) return null;
+    if (!signedSpaFile) return initialCase?.signed_spa_url ?? null;
+    const filePath = `${userId}/${Date.now()}-${sanitizeFileName(signedSpaFile.name)}`;
     const { error: uploadError } = await supabase.storage
       .from("cases")
-      .upload(filePath, customerIcFile, { upsert: true });
+      .upload(filePath, signedSpaFile, { upsert: true });
 
     if (uploadError) {
       throw uploadError;
@@ -874,6 +1092,32 @@ export function SalesCaseModal({
 
     const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
     return data.publicUrl;
+  };
+
+  const uploadCustomerIcs = async () => {
+    const nextUrls = [...formData.customers.map((customer) => customer.icUrl || "")];
+
+    for (let index = 0; index < customerIcFiles.length; index += 1) {
+      const customerIcFile = customerIcFiles[index];
+
+      if (!customerIcFile) {
+        continue;
+      }
+
+      const filePath = `${userId}/${Date.now()}-${index}-${sanitizeFileName(customerIcFile.name)}`;
+      const { error: uploadError } = await supabase.storage
+        .from("cases")
+        .upload(filePath, customerIcFile, { upsert: true });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
+      nextUrls[index] = data.publicUrl;
+    }
+
+    return nextUrls;
   };
 
   const uploadBookingReceipt = async () => {
@@ -942,8 +1186,8 @@ export function SalesCaseModal({
       return;
     }
 
-    if (!isEditing && !customerIcFile) {
-      setError("Please attach the customer I/C document.");
+    if (!isEditing && customerIcFiles.some((file) => !file)) {
+      setError("Please attach the customer I/C document for each customer.");
       return;
     }
 
@@ -956,9 +1200,10 @@ export function SalesCaseModal({
 
     try {
       let bookingFormUrl: string | null = initialCase?.booking_form_url ?? null;
-      let customerIcUrl: string | null = initialCase?.customer_ic_url ?? null;
+      let customerIcUrls: string[] = formData.customers.map((customer) => customer.icUrl || "");
       let bookingReceiptUrl: string | null = initialCase?.booking_receipt_url ?? null;
       let loDraftUrl: string | null = initialCase?.lo_draft_url ?? null;
+      let signedSpaUrl: string | null = initialCase?.signed_spa_url ?? null;
 
       try {
         bookingFormUrl = await uploadBookingForm();
@@ -989,7 +1234,21 @@ export function SalesCaseModal({
       }
 
       try {
-        customerIcUrl = await uploadCustomerIc();
+        signedSpaUrl = await uploadSignedSpa();
+      } catch (uploadError) {
+        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
+
+        if (isRowLevelSecurityError(uploadMessage)) {
+          setError("Signed SPA upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        throw uploadError;
+      }
+
+      try {
+        customerIcUrls = await uploadCustomerIcs();
       } catch (uploadError) {
         const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
 
@@ -1017,6 +1276,9 @@ export function SalesCaseModal({
       }
 
       const nextStatus = enableWorkflowFields && isEditing ? formData.status : "Pending";
+      const nextSignedSpaStatus = isSignedSpaLocked
+        ? "Complete"
+        : getScopedSignedSpaStatus(formData.signedSpaStatus, effectiveSignedSpaOptions, "None");
       const nextCommissionStructure = selectedCommissionStructure;
 
       if (!nextCommissionStructure) {
@@ -1031,8 +1293,22 @@ export function SalesCaseModal({
         return;
       }
 
+      const requiresSignedSpaAttachment =
+        nextSignedSpaStatus === "Submit" || nextSignedSpaStatus === "Complete";
+
+      if (enableWorkflowFields && requiresSignedSpaAttachment && !Boolean(signedSpaFile || signedSpaUrl)) {
+        setError("Please upload the Signed SPA attachment before setting Signed SPA status to Submit or Complete.");
+        setIsSubmitting(false);
+        return;
+      }
+
       const hasSignedLoAttachment = Boolean(loDraftFile || loDraftUrl);
       const signedLoDate = formData.signedLoDate.trim();
+
+      const customersWithIc = normalizedCustomers.map((customer, index) => ({
+        ...customer,
+        icUrl: customerIcUrls[index] || "",
+      }));
 
       if (enableWorkflowFields && hasSignedLoAttachment && !signedLoDate) {
         setError("Please select the Signed LO date after uploading the LO Draft.");
@@ -1051,15 +1327,6 @@ export function SalesCaseModal({
           [
             caseOwnerId,
             formData.involvedUserId || null,
-          ].filter(Boolean)
-        )
-      ) as string[];
-
-      const involvedIds = Array.from(
-        new Set(
-          [
-            ...directInvolvedIds,
-            ...commissionRows.map((row) => row.profileId),
           ].filter(Boolean)
         )
       ) as string[];
@@ -1091,7 +1358,9 @@ export function SalesCaseModal({
         booking_receipt_url: string | null;
         commission_structure: CommissionStructure;
         lo_draft_url?: string | null;
+        signed_spa_url?: string | null;
         signed_lo_date?: string | null;
+        signed_spa_status?: SignedSpaStatus;
         status?: SalesCaseStatus;
         created_by: string;
         involved_profile_id: string | null;
@@ -1112,7 +1381,7 @@ export function SalesCaseModal({
         customer_contact_number: primaryCustomer.contactNumber,
         customer_email: primaryCustomer.email,
         customer_address: primaryCustomer.address,
-        customer_details: normalizedCustomers,
+        customer_details: customersWithIc,
         emergency_contact_name: formData.emergencyContactName,
         emergency_contact_relationship: formData.emergencyContactRelationship,
         emergency_contact_ic_passport: formData.emergencyContactIcPassport,
@@ -1121,18 +1390,20 @@ export function SalesCaseModal({
         race: formData.race === "Other" ? formData.raceOther : formData.race,
         buyer_type: formData.buyerType,
         booking_form_url: bookingFormUrl,
-        customer_ic_url: customerIcUrl,
+        customer_ic_url: customerIcUrls[0] || null,
         booking_receipt_url: bookingReceiptUrl,
         commission_structure: nextCommissionStructure,
         created_by: caseOwnerId,
         involved_profile_id: formData.involvedUserId || null,
-        involved_user_ids: involvedIds,
+        involved_user_ids: directInvolvedIds,
       };
 
       if (enableWorkflowFields) {
         payload.lo_draft_url = loDraftUrl;
+        payload.signed_spa_url = signedSpaUrl;
         payload.signed_lo_date = signedLoDate || null;
         payload.status = nextStatus;
+        payload.signed_spa_status = nextSignedSpaStatus;
       }
 
       if (isEditing && initialCase) {
@@ -1165,7 +1436,7 @@ export function SalesCaseModal({
           await deleteBookingFormFromStorage(initialCase.booking_form_url);
         }
 
-        if (customerIcFile && initialCase.customer_ic_url) {
+        if (customerIcFiles[0] && initialCase.customer_ic_url) {
           await deleteBookingFormFromStorage(initialCase.customer_ic_url);
         }
 
@@ -1175,6 +1446,10 @@ export function SalesCaseModal({
 
         if (enableWorkflowFields && loDraftFile && initialCase.lo_draft_url) {
           await deleteBookingFormFromStorage(initialCase.lo_draft_url);
+        }
+
+        if (enableWorkflowFields && signedSpaFile && initialCase.signed_spa_url) {
+          await deleteBookingFormFromStorage(initialCase.signed_spa_url);
         }
 
         try {
@@ -1423,6 +1698,7 @@ export function SalesCaseModal({
                       Upload the LO Draft before setting the case to Signed LO.
                     </p>
                   )}
+
                 </div>
 
                 {(allowLoDraftUpload || initialCase?.lo_draft_url || isReadOnly) && (
@@ -1482,6 +1758,76 @@ export function SalesCaseModal({
                         required={Boolean((allowLoDraftUpload && loDraftFile) || formData.status === "Signed LO")}
                       />
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showWorkflowFields && (
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Signed SPA</label>
+                  <SignedSpaSelect
+                    value={formData.signedSpaStatus}
+                    options={isSignedSpaLocked ? (["Complete"] as const) : effectiveSignedSpaOptions}
+                    onChange={(status) => setFormData((prev) => ({ ...prev, signedSpaStatus: status }))}
+                    disabled={isSignedSpaLocked || isReadOnly}
+                  />
+                  <p className="mt-2 text-xs text-gray-600">
+                    Signed SPA attachment is optional and can be submitted later.
+                  </p>
+                  {isSignedSpaLocked && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      Signed SPA is marked as Complete and cannot be changed.
+                    </p>
+                  )}
+                </div>
+
+                {(allowLoDraftUpload || initialCase?.signed_spa_url || isReadOnly) && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Signed SPA Attachment (PDF)</label>
+                    {allowLoDraftUpload ? (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-white/70 bg-white/50">
+                          <Upload className="w-4 h-4 text-gray-500" />
+                          Upload Signed SPA
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            onChange={handleSignedSpaChange}
+                            className="hidden"
+                          />
+                        </label>
+                        <span className="text-xs text-gray-600">
+                          {signedSpaFile?.name || formData.signedSpaName || "No file selected"}
+                        </span>
+                        {initialCase?.signed_spa_url && (
+                          <a
+                            href={initialCase.signed_spa_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs rounded-md border border-blue-200 px-2 py-1 text-blue-700 hover:text-blue-800"
+                          >
+                            View
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700">
+                        {initialCase?.signed_spa_url ? (
+                          <a
+                            href={initialCase.signed_spa_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            View Signed SPA
+                          </a>
+                        ) : (
+                          <span className="text-gray-500">No file</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1690,6 +2036,35 @@ export function SalesCaseModal({
                       className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Attach Customer I/C (PDF/Image)</label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                        <Upload className="w-4 h-4 text-gray-500" />
+                        Upload File
+                        <input
+                          type="file"
+                          accept="application/pdf,image/*"
+                          onChange={(event) => handleCustomerIcChange(index, event)}
+                          className="hidden"
+                        />
+                      </label>
+                      <span className="text-xs text-gray-500">
+                        {customerIcFiles[index]?.name || customer.icUrl.split("/").pop() || "No file selected"}
+                      </span>
+                      {customer.icUrl && (
+                        <a
+                          href={customer.icUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs rounded-md border border-blue-200 px-2 py-1 text-blue-700 hover:text-blue-800"
+                        >
+                          View
+                        </a>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1832,34 +2207,6 @@ export function SalesCaseModal({
               <p className="text-xs text-gray-400 mt-2">
                 Upload only the booking form document.
               </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Attach Customer I/C (PDF/Image)</label>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
-                  <Upload className="w-4 h-4 text-gray-500" />
-                  Upload File
-                  <input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    onChange={handleCustomerIcChange}
-                    className="hidden"
-                  />
-                </label>
-                <span className="text-xs text-gray-500">
-                  {formData.customerIcName || "No file selected"}
-                </span>
-                {initialCase?.customer_ic_url && (
-                  <a
-                    href={initialCase.customer_ic_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs rounded-md border border-blue-200 px-2 py-1 text-blue-700 hover:text-blue-800"
-                  >
-                    View
-                  </a>
-                )}
-              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Attach Booking Receipt (PDF/Image)</label>

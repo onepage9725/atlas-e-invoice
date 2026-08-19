@@ -22,15 +22,7 @@ export type ComputedPayoutRow = {
 };
 
 export const getStoredInvolvedProfileId = (record: SalesCasePayoutSource) => {
-  if (record.involved_profile_id) {
-    return record.involved_profile_id;
-  }
-
-  const legacyInvolvedIds = (record.involved_user_ids ?? []).filter(
-    (profileId) => profileId !== record.created_by,
-  );
-
-  return legacyInvolvedIds.length === 1 ? legacyInvolvedIds[0] : null;
+  return record.involved_profile_id ?? null;
 };
 
 const getLeaderChain = (

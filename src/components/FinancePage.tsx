@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { supabase } from "../lib/supabaseClient";
 import { getCaseCommissionStructure, getShortCommissionStructureLabel } from "../lib/commissionStructures";
 import {
@@ -105,6 +106,22 @@ type VoucherHistoryMeta = {
   grossAmount?: number;
   salesCaseIds?: string[];
 };
+
+type ManualVoucherItem = {
+  id: string;
+  itemName: string;
+  itemDescription: string;
+  qty: string;
+  amount: string;
+};
+
+const createManualVoucherItem = (): ManualVoucherItem => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  itemName: "",
+  itemDescription: "",
+  qty: "1",
+  amount: "",
+});
 
 const HISTORY_META_SEPARATOR = "|||META|||";
 
@@ -264,6 +281,50 @@ const sanitizeFileName = (fileName: string) => {
   return `${normalizedBaseName || "file"}${extension}`;
 };
 
+const calculateVoucherAmounts = (
+  grossCommission: number,
+  options: {
+    deductSst: boolean;
+    deductWithholdingTax: boolean;
+  }
+) => {
+  const grossAmount = Number(grossCommission.toFixed(2));
+  const extractedSubTotal = Number((grossAmount / 1.08).toFixed(2));
+  const sstAmount = options.deductSst ? Number((grossAmount - extractedSubTotal).toFixed(2)) : 0;
+  const subTotalAmount = options.deductSst ? extractedSubTotal : grossAmount;
+  const withholdingTaxAmount = options.deductWithholdingTax
+    ? Number((subTotalAmount * 0.02).toFixed(2))
+    : 0;
+  const finalPayoutAmount = Number((subTotalAmount - withholdingTaxAmount).toFixed(2));
+
+  return {
+    grossAmount,
+    subTotalAmount,
+    sstAmount,
+    withholdingTaxAmount,
+    finalPayoutAmount,
+  };
+};
+
+const loadImageAsDataUrl = async (imagePath: string) => {
+  const response = await fetch(imagePath);
+  const imageBlob = await response.blob();
+
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Unable to read image data."));
+    };
+    reader.onerror = () => reject(new Error("Unable to load image data."));
+    reader.readAsDataURL(imageBlob);
+  });
+};
+
 export function FinancePage({ userId, role }: FinancePageProps) {
   const today = new Date();
   const defaultFromDate = getLocalDateInputValue(new Date(today.getFullYear(), today.getMonth(), 1));
@@ -304,6 +365,16 @@ export function FinancePage({ userId, role }: FinancePageProps) {
   const [pendingReceiptChange, setPendingReceiptChange] = useState<SalesCasePayoutRecord | null>(null);
   const [replacementReceiptFile, setReplacementReceiptFile] = useState<File | null>(null);
   const [isChangingReceipt, setIsChangingReceipt] = useState(false);
+  const [showManualVoucherModal, setShowManualVoucherModal] = useState(false);
+  const [isGeneratingManualVoucher, setIsGeneratingManualVoucher] = useState(false);
+  const [manualPayee, setManualPayee] = useState("");
+  const [manualIcNo, setManualIcNo] = useState("");
+  const [manualVoucherDate, setManualVoucherDate] = useState(() => getLocalDateInputValue(new Date()));
+  const [manualRefNo, setManualRefNo] = useState("");
+  const [manualChequersNo, setManualChequersNo] = useState("");
+  const [manualDeductSst, setManualDeductSst] = useState(false);
+  const [manualDeductWithholdingTax, setManualDeductWithholdingTax] = useState(false);
+  const [manualVoucherItems, setManualVoucherItems] = useState<ManualVoucherItem[]>([createManualVoucherItem()]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const replacementReceiptInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -458,6 +529,29 @@ export function FinancePage({ userId, role }: FinancePageProps) {
     setSuccess(null);
     resetEntryForm();
     setShowEntryForm(true);
+  };
+
+  const resetManualVoucherForm = () => {
+    setManualPayee("");
+    setManualIcNo("");
+    setManualVoucherDate(getLocalDateInputValue(new Date()));
+    setManualRefNo("");
+    setManualChequersNo("");
+    setManualDeductSst(false);
+    setManualDeductWithholdingTax(false);
+    setManualVoucherItems([createManualVoucherItem()]);
+  };
+
+  const openManualVoucherModal = () => {
+    setError(null);
+    setSuccess(null);
+    resetManualVoucherForm();
+    setShowManualVoucherModal(true);
+  };
+
+  const closeManualVoucherModal = () => {
+    setShowManualVoucherModal(false);
+    resetManualVoucherForm();
   };
 
   const openEditEntryModal = (entry: FinanceEntryRecord) => {
@@ -1142,6 +1236,350 @@ export function FinancePage({ userId, role }: FinancePageProps) {
     }
   };
 
+  const buildManualVoucherPdf = async (
+    items: Array<{ itemName: string; itemDescription: string; qty: number; amount: number }>,
+    voucherInfo: {
+      payee: string;
+      icNo: string;
+      voucherDate: string;
+      refNo: string;
+      chequersNo: string;
+    },
+    options: {
+      deductSst: boolean;
+      deductWithholdingTax: boolean;
+    }
+  ) => {
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const navy: [number, number, number] = [18, 33, 95];
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    const grossAmount = items.reduce((sum, item) => sum + item.amount, 0);
+    const calculatedAmounts = calculateVoucherAmounts(grossAmount, options);
+    const { subTotalAmount, sstAmount, withholdingTaxAmount, finalPayoutAmount } = calculatedAmounts;
+
+    let logoDataUrl: string | null = null;
+    try {
+      logoDataUrl = await loadImageAsDataUrl("/AO_favicon.png");
+    } catch {
+      try {
+        logoDataUrl = await loadImageAsDataUrl("/AOGfavicon.png");
+      } catch {
+        logoDataUrl = null;
+      }
+    }
+
+    if (logoDataUrl) {
+      doc.addImage(logoDataUrl, "PNG", 28, 26, 102, 62);
+    }
+
+    const leftMargin = 46;
+    const rightMargin = pageWidth - 46;
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...navy);
+    doc.setFontSize(16);
+    doc.text("ATLAS OLSEN GROUP SDN. BHD.", 136, 68);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("202101036790 (1437090-T)", 430, 82);
+    doc.setDrawColor(...navy);
+    doc.setLineWidth(1);
+    doc.line(28, 98, rightMargin, 98);
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(11);
+    const companyAddressLines = [
+      "22-02, Laman Niaga Sunway,",
+      "Persiaran Medini 3,",
+      "Sunway City Iskandar Puteri,",
+      "79250 Iskandar Puteri, Johor Darul Takzim.",
+      "Email: atlasolsenrealtysdbhd@gmail.com",
+      "Contact: +6017-831 2209",
+    ];
+    companyAddressLines.forEach((line, index) => {
+      doc.text(line, leftMargin, 146 + index * 22);
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(30 / 3.2);
+    doc.text("PAYMENT VOUCHER", leftMargin, 300);
+    doc.line(leftMargin, 304, leftMargin + 120, 304);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    const parsedVoucherDate = new Date(`${voucherInfo.voucherDate}T00:00:00`);
+    const dateLabel = Number.isNaN(parsedVoucherDate.getTime())
+      ? voucherInfo.voucherDate
+      : parsedVoucherDate.toLocaleDateString("en-MY");
+    doc.text("Payee", leftMargin, 326);
+    doc.text(`: ${voucherInfo.payee || "-"}`, 126, 326);
+    doc.text("I/C No", leftMargin, 348);
+    doc.text(`: ${voucherInfo.icNo || "-"}`, 126, 348);
+    doc.text("Date", leftMargin, 370);
+    doc.text(`: ${dateLabel}`, 126, 370);
+
+    doc.text("Ref. No.", 330, 326);
+    doc.text(`: ${voucherInfo.refNo || "-"}`, 440, 326);
+    doc.text("Chequers No.", 330, 348);
+    doc.text(`: ${voucherInfo.chequersNo || "-"}`, 440, 348);
+
+    const tableTop = 398;
+    const col = {
+      x0: 40,
+      x1: 75,
+      x2: 375,
+      x3: 430,
+      x4: 555,
+    };
+
+    const drawTableHeader = (topY: number) => {
+      doc.setFillColor(...navy);
+      doc.rect(col.x0, topY, col.x4 - col.x0, 22, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.text("#", (col.x0 + col.x1) / 2, topY + 15, { align: "center" });
+      doc.text("Item & Description", (col.x1 + col.x2) / 2, topY + 15, { align: "center" });
+      doc.text("Qty", (col.x2 + col.x3) / 2, topY + 15, { align: "center" });
+      doc.text("Amount", (col.x3 + col.x4) / 2, topY + 15, { align: "center" });
+    };
+
+    drawTableHeader(tableTop);
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+
+    let currentY = tableTop + 36;
+    const footerHeight = 40;
+    const summaryBlockHeight =
+      (options.deductSst ? 24 : 0) +
+      30 +
+      (options.deductWithholdingTax ? 30 : 0) +
+      26;
+
+    items.forEach((item, index) => {
+      const itemBlockHeight = 62;
+      const isLastRow = index === items.length - 1;
+      const requiredHeight = itemBlockHeight + (isLastRow ? summaryBlockHeight + 8 : 0);
+
+      if (currentY + requiredHeight > pageHeight - footerHeight) {
+        doc.addPage();
+        const nextTableTop = 52;
+        drawTableHeader(nextTableTop);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+        currentY = nextTableTop + 36;
+      }
+
+      doc.text(String(index + 1), (col.x0 + col.x1) / 2, currentY + 18, { align: "center" });
+      doc.setFont("helvetica", "bold");
+      doc.text(item.itemName, col.x1 + 8, currentY + 10);
+      doc.setFont("helvetica", "normal");
+      doc.text(item.itemDescription, col.x1 + 8, currentY + 40);
+      doc.text(String(item.qty), (col.x2 + col.x3) / 2, currentY + 18, { align: "center" });
+      doc.text(`RM ${formatAmount(item.amount)}`, col.x4 - 8, currentY + 18, { align: "right" });
+
+      currentY += itemBlockHeight;
+    });
+
+    currentY += 8;
+    doc.setFont("helvetica", "normal");
+    if (options.deductSst) {
+      doc.text("Deduct SST", 222, currentY);
+      doc.text(":", 330, currentY);
+      doc.text("8%", 430, currentY, { align: "right" });
+      doc.text(`RM ${formatAmount(sstAmount)}`, col.x4 - 8, currentY, { align: "right" });
+      currentY += 24;
+    }
+
+    doc.setFillColor(220, 220, 220);
+    doc.rect(col.x0, currentY - 14, col.x4 - col.x0, 20, "F");
+    doc.setFont("helvetica", "bold");
+    doc.text("Sub Total", 185, currentY);
+    doc.text(`RM ${formatAmount(subTotalAmount)}`, col.x4 - 8, currentY, { align: "right" });
+    currentY += 30;
+
+    doc.setFont("helvetica", "normal");
+    if (options.deductWithholdingTax) {
+      doc.text("Deduct Withholding Tax", 172, currentY);
+      doc.text(":", 330, currentY);
+      doc.text("2%", 430, currentY, { align: "right" });
+      doc.text(`RM ${formatAmount(withholdingTaxAmount)}`, col.x4 - 8, currentY, { align: "right" });
+      currentY += 30;
+    }
+
+    doc.setFillColor(...navy);
+    doc.rect(355, currentY - 15, 200, 24, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.text("Total", 418, currentY + 1, { align: "center" });
+    doc.text(`RM ${formatAmount(finalPayoutAmount)}`, 548, currentY + 1, { align: "right" });
+
+    const pageCount = doc.getNumberOfPages();
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      doc.setPage(pageNumber);
+      doc.text(String(pageNumber), pageWidth / 2, pageHeight - 24, { align: "center" });
+    }
+
+    return doc.output("blob");
+  };
+
+  const handleGenerateManualVoucher = async () => {
+    const payee = manualPayee.trim();
+    const icNo = manualIcNo.trim();
+    const refNo = manualRefNo.trim();
+    const chequersNo = manualChequersNo.trim();
+
+    if (!payee || !icNo || !manualVoucherDate || !refNo || !chequersNo) {
+      setError("Please fill in Payee, I/C No, Date, Ref No, and Chequers No.");
+      return;
+    }
+
+    const normalizedItems = manualVoucherItems
+      .map((item) => ({
+        itemName: item.itemName.trim(),
+        itemDescription: item.itemDescription.trim(),
+        qty: Number(item.qty),
+        amount: Number(item.amount),
+      }))
+      .filter(
+        (item) =>
+          item.itemName ||
+          item.itemDescription ||
+          Number.isFinite(item.qty) ||
+          Number.isFinite(item.amount)
+      );
+
+    if (normalizedItems.length === 0) {
+      setError("Please add at least one voucher item.");
+      return;
+    }
+
+    const hasInvalidItem = normalizedItems.some(
+      (item) =>
+        !item.itemName ||
+        !item.itemDescription ||
+        !Number.isFinite(item.qty) ||
+        item.qty <= 0 ||
+        !Number.isFinite(item.amount) ||
+        item.amount <= 0
+    );
+
+    if (hasInvalidItem) {
+      setError("Each item must have item name, description, qty more than 0, and amount more than 0.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setIsGeneratingManualVoucher(true);
+
+    const options = {
+      deductSst: manualDeductSst,
+      deductWithholdingTax: manualDeductWithholdingTax,
+    };
+    const deductionText = [
+      options.deductSst ? "Deduct SST 8%" : null,
+      options.deductWithholdingTax ? "Deduct WHT 2%" : null,
+    ].filter(Boolean).join(", ");
+    const rawTotal = normalizedItems.reduce((sum, item) => sum + item.amount, 0);
+    const calculatedAmounts = calculateVoucherAmounts(rawTotal, options);
+    const detailsSummary = normalizedItems
+      .map((item) => `${item.itemName}: ${item.itemDescription} (Qty ${item.qty})`)
+      .join("; ");
+
+    let voucherStoragePath: string | null = null;
+    let voucherUrl: string | null = null;
+
+    try {
+      const voucherBlob = await buildManualVoucherPdf(
+        normalizedItems,
+        {
+          payee,
+          icNo,
+          voucherDate: manualVoucherDate,
+          refNo,
+          chequersNo,
+        },
+        options
+      );
+
+      voucherStoragePath = `payment-vouchers/manual/${userId}/${Date.now()}-${sanitizeFileName(payee)}.pdf`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("cases")
+        .upload(voucherStoragePath, voucherBlob, {
+          upsert: false,
+          contentType: "application/pdf",
+        });
+
+      if (uploadError) {
+        setError(uploadError.message);
+        setIsGeneratingManualVoucher(false);
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage.from("cases").getPublicUrl(voucherStoragePath);
+      voucherUrl = publicUrlData.publicUrl;
+
+      const referenceMeta = JSON.stringify({
+        type: "manual_payment_voucher",
+        payee,
+        icNo,
+        refNo,
+        chequersNo,
+        voucherDate: manualVoucherDate,
+        deductSst: options.deductSst,
+        deductWithholdingTax: options.deductWithholdingTax,
+        items: normalizedItems,
+        grossAmount: Number(calculatedAmounts.grossAmount.toFixed(2)),
+        finalAmount: Number(calculatedAmounts.finalPayoutAmount.toFixed(2)),
+      });
+
+      const referenceDetail = `${detailsSummary || "Manual voucher"}${HISTORY_META_SEPARATOR}${referenceMeta}${deductionText ? ` | ${deductionText}` : ""}`;
+
+      const { error: insertError } = await supabase.from("finance_entries").insert({
+        entry_type: "cash_out",
+        amount: calculatedAmounts.finalPayoutAmount,
+        description: "Manual payment voucher generated",
+        reference_label: `Payment Voucher - ${payee}`,
+        reference_detail: referenceDetail,
+        attachment_url: voucherUrl,
+        sales_case_id: null,
+        entry_scope: "manual",
+        transacted_at: new Date(`${manualVoucherDate}T00:00:00`).toISOString(),
+        created_by: userId,
+      });
+
+      if (insertError) {
+        if (voucherStoragePath) {
+          await supabase.storage.from("cases").remove([voucherStoragePath]).catch(() => undefined);
+        }
+        setError(insertError.message);
+        setIsGeneratingManualVoucher(false);
+        return;
+      }
+
+      await fetchData();
+      setIsGeneratingManualVoucher(false);
+      setShowManualVoucherModal(false);
+      setSuccess("Manual payment voucher PDF generated successfully.");
+    } catch (generationError) {
+      if (voucherUrl) {
+        await deleteAttachmentByUrl(voucherUrl).catch(() => undefined);
+      }
+      setError(generationError instanceof Error ? generationError.message : "Unable to generate manual payment voucher.");
+      setIsGeneratingManualVoucher(false);
+    }
+  };
+
   return (
     <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -1152,14 +1590,23 @@ export function FinancePage({ userId, role }: FinancePageProps) {
           </p>
         </div>
         {canManageEntries && (
-          <button
-            type="button"
-            onClick={openNewEntryModal}
-            className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            <Plus className="h-4 w-4" />
-            Add Cash In / Out
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={openManualVoucherModal}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Generate Payment Voucher
+            </button>
+            <button
+              type="button"
+              onClick={openNewEntryModal}
+              className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              <Plus className="h-4 w-4" />
+              Add Cash In / Out
+            </button>
+          </div>
         )}
       </div>
 
@@ -1834,6 +2281,230 @@ export function FinancePage({ userId, role }: FinancePageProps) {
                 className="px-4 py-2 text-sm rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-60"
               >
                 {isChangingReceipt ? "Saving..." : "Save Receipt"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {canManageEntries && showManualVoucherModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-4xl rounded-2xl border border-gray-100 bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Generate Payment Voucher</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Create a manual payment voucher using the same voucher format.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeManualVoucherModal}
+                className="rounded-lg px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Payee</label>
+                <input
+                  type="text"
+                  value={manualPayee}
+                  onChange={(event) => setManualPayee(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Enter payee name"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">I/C No</label>
+                <input
+                  type="text"
+                  value={manualIcNo}
+                  onChange={(event) => setManualIcNo(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Enter I/C No"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Date</label>
+                <input
+                  type="date"
+                  value={manualVoucherDate}
+                  onChange={(event) => setManualVoucherDate(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Ref No</label>
+                <input
+                  type="text"
+                  value={manualRefNo}
+                  onChange={(event) => setManualRefNo(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Enter reference number"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Chequers No</label>
+                <input
+                  type="text"
+                  value={manualChequersNo}
+                  onChange={(event) => setManualChequersNo(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Enter chequers number"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-5 text-sm text-gray-700">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={manualDeductSst}
+                  onChange={(event) => setManualDeductSst(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                Deduct SST 8%
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={manualDeductWithholdingTax}
+                  onChange={(event) => setManualDeductWithholdingTax(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                Deduct Withholding Tax 2%
+              </label>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-gray-100">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <div className="text-sm font-semibold text-gray-800">Voucher Items</div>
+                <button
+                  type="button"
+                  onClick={() => setManualVoucherItems((prev) => [...prev, createManualVoucherItem()])}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Item
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm whitespace-nowrap">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-left text-gray-500">
+                      <th className="px-4 py-2">Item Name</th>
+                      <th className="px-4 py-2">Description</th>
+                      <th className="px-4 py-2">Qty</th>
+                      <th className="px-4 py-2">Amount (RM)</th>
+                      <th className="px-4 py-2 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualVoucherItems.map((item) => (
+                      <tr key={item.id} className="border-b border-gray-50">
+                        <td className="px-4 py-2">
+                          <input
+                            type="text"
+                            value={item.itemName}
+                            onChange={(event) =>
+                              setManualVoucherItems((prev) =>
+                                prev.map((row) =>
+                                  row.id === item.id ? { ...row, itemName: event.target.value } : row
+                                )
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                            placeholder="Enter item name"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="text"
+                            value={item.itemDescription}
+                            onChange={(event) =>
+                              setManualVoucherItems((prev) =>
+                                prev.map((row) =>
+                                  row.id === item.id ? { ...row, itemDescription: event.target.value } : row
+                                )
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                            placeholder="Enter item description"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={item.qty}
+                            onChange={(event) =>
+                              setManualVoucherItems((prev) =>
+                                prev.map((row) =>
+                                  row.id === item.id ? { ...row, qty: event.target.value } : row
+                                )
+                              )
+                            }
+                            className="w-28 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.amount}
+                            onChange={(event) =>
+                              setManualVoucherItems((prev) =>
+                                prev.map((row) =>
+                                  row.id === item.id ? { ...row, amount: event.target.value } : row
+                                )
+                              )
+                            }
+                            className="w-36 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setManualVoucherItems((prev) =>
+                                prev.length > 1 ? prev.filter((row) => row.id !== item.id) : prev
+                              )
+                            }
+                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
+                            disabled={manualVoucherItems.length <= 1}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeManualVoucherModal}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                disabled={isGeneratingManualVoucher}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleGenerateManualVoucher()}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                disabled={isGeneratingManualVoucher}
+              >
+                {isGeneratingManualVoucher ? "Generating..." : "Generate PDF"}
               </button>
             </div>
           </div>
