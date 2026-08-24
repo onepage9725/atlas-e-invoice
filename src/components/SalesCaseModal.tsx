@@ -567,6 +567,13 @@ const createEmptyForm = () => ({
 });
 
 const formatNumberInput = (value: number | null) => (value === null ? "" : value.toString());
+const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+
+const isFileTooLarge = (file: File | null | undefined) =>
+  Boolean(file && file.size > MAX_UPLOAD_SIZE_BYTES);
+
+const getFileSizeError = (label: string) =>
+  `${label} exceeds the 100MB file size limit. Please upload a file smaller than 100MB.`;
 
 function toNumberOrNull(value: string) {
   if (value === "") return null;
@@ -1001,24 +1008,52 @@ export function SalesCaseModal({
 
   const handleBookingFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+
+    if (isFileTooLarge(file)) {
+      setError(getFileSizeError("Booking form"));
+      return;
+    }
+
+    setError(null);
     setBookingFormFile(file);
     setFormData((prev) => ({ ...prev, bookingFormName: file ? file.name : "" }));
   };
 
   const handleLoDraftChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+
+    if (isFileTooLarge(file)) {
+      setError(getFileSizeError("LO Draft"));
+      return;
+    }
+
+    setError(null);
     setLoDraftFile(file);
     setFormData((prev) => ({ ...prev, loDraftName: file ? file.name : prev.loDraftName }));
   };
 
   const handleSignedSpaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+
+    if (isFileTooLarge(file)) {
+      setError(getFileSizeError("Signed SPA"));
+      return;
+    }
+
+    setError(null);
     setSignedSpaFile(file);
     setFormData((prev) => ({ ...prev, signedSpaName: file ? file.name : prev.signedSpaName }));
   };
 
   const handleCustomerIcChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+
+    if (isFileTooLarge(file)) {
+      setError(getFileSizeError("Customer I/C"));
+      return;
+    }
+
+    setError(null);
 
     setCustomerIcFiles((prev) => {
       const next = [...prev];
@@ -1029,6 +1064,13 @@ export function SalesCaseModal({
 
   const handleBookingReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+
+    if (isFileTooLarge(file)) {
+      setError(getFileSizeError("Booking receipt"));
+      return;
+    }
+
+    setError(null);
     setBookingReceiptFile(file);
     setFormData((prev) => ({ ...prev, bookingReceiptName: file ? file.name : "" }));
   };

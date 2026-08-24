@@ -1307,6 +1307,21 @@ export function PaymentVoucherPage({
     });
   };
 
+  const getImageDimensions = (dataUrl: string) =>
+    new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        if (image.width > 0 && image.height > 0) {
+          resolve({ width: image.width, height: image.height });
+          return;
+        }
+
+        reject(new Error("Invalid image dimensions."));
+      };
+      image.onerror = () => reject(new Error("Unable to read image dimensions."));
+      image.src = dataUrl;
+    });
+
   const buildVoucherPdf = async (
     rows: VoucherBreakdownRow[],
     options: {
@@ -1332,17 +1347,25 @@ export function PaymentVoucherPage({
 
     let logoDataUrl: string | null = null;
     try {
-      logoDataUrl = await loadImageAsDataUrl("/AO_favicon.png");
+      logoDataUrl = await loadImageAsDataUrl("/AOGfavicon.png");
     } catch {
-      try {
-        logoDataUrl = await loadImageAsDataUrl("/AOGfavicon.png");
-      } catch {
-        logoDataUrl = null;
-      }
+      logoDataUrl = null;
     }
 
     if (logoDataUrl) {
-      doc.addImage(logoDataUrl, "PNG", 28, 26, 102, 62);
+      try {
+        const { width, height } = await getImageDimensions(logoDataUrl);
+        const maxWidth = 102;
+        const maxHeight = 62;
+        const scale = Math.min(maxWidth / width, maxHeight / height);
+        const drawWidth = width * scale;
+        const drawHeight = height * scale;
+        const drawX = 28 + (maxWidth - drawWidth) / 2;
+        const drawY = 26 + (maxHeight - drawHeight) / 2;
+        doc.addImage(logoDataUrl, "PNG", drawX, drawY, drawWidth, drawHeight);
+      } catch {
+        doc.addImage(logoDataUrl, "PNG", 28, 26, 62, 62);
+      }
     }
 
     const leftMargin = 46;

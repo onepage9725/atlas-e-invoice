@@ -325,6 +325,21 @@ const loadImageAsDataUrl = async (imagePath: string) => {
   });
 };
 
+const getImageDimensions = (dataUrl: string) =>
+  new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      if (image.width > 0 && image.height > 0) {
+        resolve({ width: image.width, height: image.height });
+        return;
+      }
+
+      reject(new Error("Invalid image dimensions."));
+    };
+    image.onerror = () => reject(new Error("Unable to read image dimensions."));
+    image.src = dataUrl;
+  });
+
 export function FinancePage({ userId, role }: FinancePageProps) {
   const today = new Date();
   const defaultFromDate = getLocalDateInputValue(new Date(today.getFullYear(), today.getMonth(), 1));
@@ -1261,17 +1276,25 @@ export function FinancePage({ userId, role }: FinancePageProps) {
 
     let logoDataUrl: string | null = null;
     try {
-      logoDataUrl = await loadImageAsDataUrl("/AO_favicon.png");
+      logoDataUrl = await loadImageAsDataUrl("/AOGfavicon.png");
     } catch {
-      try {
-        logoDataUrl = await loadImageAsDataUrl("/AOGfavicon.png");
-      } catch {
-        logoDataUrl = null;
-      }
+      logoDataUrl = null;
     }
 
     if (logoDataUrl) {
-      doc.addImage(logoDataUrl, "PNG", 28, 26, 102, 62);
+      try {
+        const { width, height } = await getImageDimensions(logoDataUrl);
+        const maxWidth = 102;
+        const maxHeight = 62;
+        const scale = Math.min(maxWidth / width, maxHeight / height);
+        const drawWidth = width * scale;
+        const drawHeight = height * scale;
+        const drawX = 28 + (maxWidth - drawWidth) / 2;
+        const drawY = 26 + (maxHeight - drawHeight) / 2;
+        doc.addImage(logoDataUrl, "PNG", drawX, drawY, drawWidth, drawHeight);
+      } catch {
+        doc.addImage(logoDataUrl, "PNG", 28, 26, 62, 62);
+      }
     }
 
     const leftMargin = 46;
@@ -1362,7 +1385,7 @@ export function FinancePage({ userId, role }: FinancePageProps) {
       26;
 
     items.forEach((item, index) => {
-      const itemBlockHeight = 62;
+      const itemBlockHeight = 44;
       const isLastRow = index === items.length - 1;
       const requiredHeight = itemBlockHeight + (isLastRow ? summaryBlockHeight + 8 : 0);
 
@@ -1376,13 +1399,14 @@ export function FinancePage({ userId, role }: FinancePageProps) {
         currentY = nextTableTop + 36;
       }
 
-      doc.text(String(index + 1), (col.x0 + col.x1) / 2, currentY + 18, { align: "center" });
+      const rowBaselineY = currentY + 18;
+      doc.text(String(index + 1), (col.x0 + col.x1) / 2, rowBaselineY, { align: "center" });
       doc.setFont("helvetica", "bold");
-      doc.text(item.itemName, col.x1 + 8, currentY + 10);
+      doc.text(item.itemName, col.x1 + 8, rowBaselineY);
       doc.setFont("helvetica", "normal");
-      doc.text(item.itemDescription, col.x1 + 8, currentY + 40);
-      doc.text(String(item.qty), (col.x2 + col.x3) / 2, currentY + 18, { align: "center" });
-      doc.text(`RM ${formatAmount(item.amount)}`, col.x4 - 8, currentY + 18, { align: "right" });
+      doc.text(item.itemDescription, col.x1 + 8, rowBaselineY + 16);
+      doc.text(String(item.qty), (col.x2 + col.x3) / 2, rowBaselineY, { align: "center" });
+      doc.text(`RM ${formatAmount(item.amount)}`, col.x4 - 8, rowBaselineY, { align: "right" });
 
       currentY += itemBlockHeight;
     });
