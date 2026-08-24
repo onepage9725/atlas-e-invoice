@@ -455,18 +455,26 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
 
   const fetchCases = async () => {
     setError(null);
-    const { data, error: fetchError } = await supabase
-      .from("sales_cases")
-      .select("*")
-      .or(`created_by.eq.${userId},involved_user_ids.cs.{${userId}}`)
-      .order("created_at", { ascending: false });
+    const [caseResult, payoutCaseResult] = await Promise.all([
+      supabase.rpc("get_ranking_sales_cases"),
+      supabase
+        .from("sales_case_payouts")
+        .select("sales_case_id")
+        .eq("profile_id", userId)
+        .in("payout_status", ["Pending", "Paid", "Approve"]),
+    ]);
 
-    if (fetchError) {
-      setError(fetchError.message);
+    if (caseResult.error) {
+      setError(caseResult.error.message);
       return;
     }
 
-    setCases((data as SalesCaseRecord[]) ?? []);
+    if (payoutCaseResult.error) {
+      setError(payoutCaseResult.error.message);
+      return;
+    }
+
+    setCases((caseResult.data as SalesCaseRecord[]) ?? []);
   };
 
   const fetchPayouts = async () => {
@@ -712,7 +720,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
   };
 
   const displaySalesCaseRows = useMemo<DisplaySalesCaseRow[]>(() => {
-    return salesCaseRows.map((row) => {
+    return salesCaseRows.reduce<DisplaySalesCaseRow[]>((rows, row) => {
       const record = row.record;
       const projectName = record.project_id
         ? projectMap.get(record.project_id)?.project_name || "-"
@@ -748,7 +756,24 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
       const topUpLabel = topUpPayout
         ? `${getShortCommissionStructureLabel(topUpPayout.source_commission_structure_label) || topUpPayout.source_commission_structure_id || "Previous Tier"} -> ${getShortCommissionStructureLabel(topUpPayout.target_commission_structure_label) || topUpPayout.target_commission_structure_id || "New Tier"}`
         : null;
-      return {
+
+      const isInvolved = (record.involved_user_ids ?? []).includes(userId);
+      const hasStandardPayout = Boolean(viewerPayout);
+      const hasComputedDirectCommission = Number(viewerCommission ?? 0) > 0;
+      const hasComputedHoldingCommission = Number(row.holdingAmount ?? 0) > 0;
+      const isVisibleToViewer =
+        row.rowType === "top_up" ||
+        isCreator ||
+        isInvolved ||
+        hasStandardPayout ||
+        hasComputedDirectCommission ||
+        hasComputedHoldingCommission;
+
+      if (!isVisibleToViewer) {
+        return rows;
+      }
+
+      rows.push({
         row,
         projectName,
         topUpPayout,
@@ -765,8 +790,10 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
         displayStatus,
         displayCommission,
         topUpLabel,
-      };
-    });
+      });
+
+      return rows;
+    }, []);
   }, [payoutMap, profileMap, projectMap, salesCaseRows, userId]);
 
   const selectedMonth = selectedMonthValue === "all" ? null : `${selectedYearValue}-${selectedMonthValue}`;
@@ -938,9 +965,19 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
 
   const totalMonthlyPendingCases = useMemo(
     () =>
-      selectedMonthBaseRows.filter(
-        (item) => !["Approve", "Paid", "Completed", "Reject", "Cancel"].includes(item.displayStatus)
-      ).length,
+      selectedMonthBaseRows.reduce((sum, item) => {
+        if (["Approve", "Paid", "Completed", "Reject", "Cancel"].includes(item.displayStatus)) {
+          return sum;
+        }
+
+        // Override-only cases should not increase pending case count.
+        if ((item.viewerAgentCommission ?? 0) <= 0) {
+          return sum;
+        }
+
+        const hasInvolvedSalesperson = Boolean(getStoredInvolvedProfileId(item.row.record));
+        return sum + (hasInvolvedSalesperson ? 0.5 : 1);
+      }, 0),
     [selectedMonthBaseRows]
   );
 

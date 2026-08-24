@@ -12,7 +12,6 @@ import {
 import {
   getCaseStatusClasses,
   hasCaseWorkflowColumns,
-  isCaseLockedForEditing,
   MANAGE_SIGNED_SPA_OPTIONS,
   MANAGE_CASE_STATUS_OPTIONS,
   normalizeCaseStatus,
@@ -935,7 +934,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
                 const bookingDate = record.booking_date ? new Date(record.booking_date) : null;
                 const needsReview = editedAt && (!reviewedAt || reviewedAt < editedAt);
                 const status = normalizeCaseStatus(record.status);
-                const isLocked = isCaseLockedForEditing(record.status);
                 const relatedPayouts = (payoutMap.get(record.id) ?? []).filter(
                   (payout) => payout.payout_type !== "tier_upgrade_top_up"
                 );
@@ -1070,13 +1068,14 @@ export function ManageCases({ userId }: ManageCasesProps) {
                           type="button"
                           onClick={() => {
                             setEditingCase(record);
-                            setIsReadOnlyModal(isLocked);
+                            // Admin/super admin can always edit workflow fields, including Signed SPA status.
+                            setIsReadOnlyModal(false);
                             setIsModalOpen(true);
                           }}
                           className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 text-gray-600 hover:text-gray-900"
                         >
                           <Pencil className="h-3 w-3" />
-                          {isLocked ? "View" : "Edit"}
+                          Edit
                         </button>
                       </div>
                     </td>

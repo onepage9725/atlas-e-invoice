@@ -206,7 +206,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
 
     const loadSummaryData = async () => {
       const [caseResult, payoutResult, entryResult, projectResult, profileResult] = await Promise.all([
-        supabase.from("sales_cases").select("*").order("created_at", { ascending: false }),
+        supabase.rpc("get_ranking_sales_cases"),
         supabase
           .from("sales_case_payouts")
           .select("*")
@@ -559,6 +559,38 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
     return (record.nett_price ?? 0) * (totalPercentage / 100);
   };
 
+  const getViewerAgentCommission = (record: SalesCaseRecord) => {
+    if (!userId) {
+      return 0;
+    }
+
+    const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+    const commissionStructure = getCaseCommissionStructure(record, project);
+    const directPercentage = getDirectCommissionPercentage(commissionStructure);
+    const directCommissionStructure = commissionStructure
+      ? buildCommissionStructureByTotalPercentage(
+          commissionStructure,
+          directPercentage,
+          `${commissionStructure.id}-direct`,
+          commissionStructure.label,
+        )
+      : null;
+
+    if (!project || !directCommissionStructure) {
+      return 0;
+    }
+
+    const involvedUserId = getStoredInvolvedProfileId(record);
+    const participantIds = Array.from(new Set([record.created_by, involvedUserId].filter(Boolean))) as string[];
+
+    if (participantIds.length === 0 || !participantIds.includes(userId)) {
+      return 0;
+    }
+
+    const splitAgentPercentage = (directCommissionStructure.agent_commission ?? 0) / participantIds.length;
+    return (record.nett_price ?? 0) * (splitAgentPercentage / 100);
+  };
+
   const downlineIds = useMemo(() => {
     if (!currentProfile || !canViewMemberMetrics) {
       return [] as string[];
@@ -635,9 +667,15 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       }
 
       const relatedIds = [record.created_by, ...(record.involved_user_ids ?? [])].filter(Boolean) as string[];
-      return relatedIds.includes(userId);
+      const isCreatorOrInvolved = relatedIds.includes(userId);
+      const relatedPayouts = (payoutMap.get(record.id) ?? []).filter((payout) => payout.payout_type !== "tier_upgrade_top_up");
+      const hasStandardPayout = relatedPayouts.some((payout) => payout.profile_id === userId);
+      const hasComputedDirectCommission = Number(getViewerCommission(record) ?? 0) > 0;
+      const hasComputedHoldingCommission = Number(getViewerHoldingCommission(record) ?? 0) > 0;
+
+      return isCreatorOrInvolved || hasStandardPayout || hasComputedDirectCommission || hasComputedHoldingCommission;
     });
-  }, [cases, defaultFromDate, defaultToDate, userId]);
+  }, [cases, defaultFromDate, defaultToDate, payoutMap, userId]);
 
   const memberTeamCaseRows = useMemo(() => {
     if (!userId) {
@@ -847,11 +885,88 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       return Boolean(rowDate && rowDate >= defaultFromDate && rowDate <= defaultToDate);
     });
 
-    return allRows.reduce(
+    const convertedFromRows = allRows.reduce(
       (sum, row) => sum + (row.displayStatus === "Completed" ? row.displayCommission ?? 0 : 0),
       0
     );
-  }, [cases, defaultFromDate, defaultToDate, memberCaseRows, payoutMap, payouts, userId]);
+
+    const scopedCaseIds = new Set(memberCaseRows.map((record) => record.id));
+    const payoutById = new Map(payouts.map((payout) => [payout.id, payout]));
+    const userPayoutIds = new Set(
+      payouts
+        .filter((payout) => payout.profile_id === userId)
+        .map((payout) => payout.id)
+    );
+
+    const convertedFromVouchers = entries.reduce((sum, entry) => {
+      if (entry.description !== "Payment voucher generated") {
+        return sum;
+      }
+
+      const meta = parseVoucherHistoryMeta(entry.reference_detail);
+
+      if (!meta) {
+        return sum;
+      }
+
+      const hasProfileMatch = (meta.profileIds ?? []).includes(userId);
+      const relatedCaseIds = new Set<string>((meta.salesCaseIds ?? []).filter(Boolean));
+      const linkedPayoutIds = new Set<string>((meta.payoutIds ?? []).filter(Boolean));
+
+      (meta.componentKeys ?? []).forEach((componentKey) => {
+        const payoutId = getPayoutIdFromComponentKey(componentKey);
+
+        if (!payoutId) {
+          return;
+        }
+
+        linkedPayoutIds.add(payoutId);
+        const payout = payoutById.get(payoutId);
+
+        if (payout?.sales_case_id) {
+          relatedCaseIds.add(payout.sales_case_id);
+        }
+      });
+
+      linkedPayoutIds.forEach((payoutId) => {
+        const payout = payoutById.get(payoutId);
+
+        if (payout?.sales_case_id) {
+          relatedCaseIds.add(payout.sales_case_id);
+        }
+      });
+
+      const hasPayoutMatch = Array.from(linkedPayoutIds).some((payoutId) => userPayoutIds.has(payoutId));
+
+      if (!hasProfileMatch && !hasPayoutMatch) {
+        return sum;
+      }
+
+      const hasScopedCase = Array.from(relatedCaseIds).some((caseId) => scopedCaseIds.has(caseId));
+
+      if (!hasScopedCase) {
+        return sum;
+      }
+
+      const hasUnpaidLinkedPayout =
+        linkedPayoutIds.size === 0 ||
+        Array.from(linkedPayoutIds).some((payoutId) => payoutById.get(payoutId)?.payout_status !== "Paid");
+
+      if (!hasUnpaidLinkedPayout) {
+        return sum;
+      }
+
+      const grossAmount = Number(meta.grossAmount ?? entry.amount ?? 0);
+
+      if (!Number.isFinite(grossAmount)) {
+        return sum;
+      }
+
+      return sum + grossAmount;
+    }, 0);
+
+    return convertedFromRows + convertedFromVouchers;
+  }, [cases, defaultFromDate, defaultToDate, entries, memberCaseRows, payoutMap, payouts, userId]);
 
   const totalPersonalMonthlySales = useMemo(() => {
     if (!userId) {
@@ -913,7 +1028,18 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
     return allRows.reduce((sum, row) => sum + (row.displayCommission ?? 0), 0);
   }, [cases, defaultFromDate, defaultToDate, memberCaseRows, payoutMap, payouts, userId]);
 
-  const totalPersonalMonthlyCaseCount = useMemo(() => memberCaseRows.length, [memberCaseRows]);
+  const totalPersonalMonthlyCaseCount = useMemo(
+    () =>
+      memberCaseRows.reduce((sum, record) => {
+        if (getViewerAgentCommission(record) <= 0) {
+          return sum;
+        }
+
+        const hasInvolvedSalesperson = Boolean(getStoredInvolvedProfileId(record));
+        return sum + (hasInvolvedSalesperson ? 0.5 : 1);
+      }, 0),
+    [memberCaseRows]
+  );
 
   const totalPersonalMonthlyPendingCases = useMemo(
     () =>

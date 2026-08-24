@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { getMemberRankSummary, type MemberRankSummary, type RankProfile } from "../lib/memberRanks";
 import {
+  getCaseCommissionAmountForProfile,
   getCaseCommissionAmountForProfiles,
   getCaseHoldingCommissionAmountForProfile,
   getCasePersonalAmountForProfiles,
@@ -82,34 +83,6 @@ const parsePaymentVoucherMeta = (referenceDetail: string | null | undefined) => 
   } catch {
     return null;
   }
-};
-
-const deriveGrossAmountFromHistory = (finalAmount: number, referenceDetail: string | null | undefined) => {
-  const meta = parsePaymentVoucherMeta(referenceDetail);
-
-  if (meta?.grossAmount !== undefined && meta.grossAmount !== null) {
-    return Number(Number(meta.grossAmount).toFixed(2));
-  }
-
-  const normalizedDetail = (referenceDetail ?? "").toLowerCase();
-  const hasSst = normalizedDetail.includes("deduct sst 8%");
-  const hasWht =
-    normalizedDetail.includes("deduct wht 2%") ||
-    normalizedDetail.includes("deduct withholding tax 2%");
-
-  if (hasSst && hasWht) {
-    return Number(((finalAmount * 1.08) / 0.98).toFixed(2));
-  }
-
-  if (hasSst) {
-    return Number((finalAmount * 1.08).toFixed(2));
-  }
-
-  if (hasWht) {
-    return Number((finalAmount / 0.98).toFixed(2));
-  }
-
-  return Number(finalAmount.toFixed(2));
 };
 
 const getStandardPayoutComponentRows = (payout: SalesCasePayoutRecord) => {
@@ -235,13 +208,6 @@ const formatDate = (value: string | null) => {
 };
 
 const formatRankLabel = (value: string | null | undefined) => (value ? value.replace("_", " ") : "-");
-const normalizeLabel = (value: string | null | undefined) =>
-  (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/[^a-z0-9@.\s]/g, "")
-    .replace(/\s+/g, " ");
 
 const isMemberProfile = (profile: TeamProfile) =>
   profile.role === "agent" || profile.role === "leader" || ["agent", "pre_leader", "leader"].includes(profile.rank ?? "");
@@ -325,7 +291,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
           .from("profiles")
           .select("id, name, email, role, rank, recruit_by, personal_points, group_points, is_active")
           .is("deleted_at", null),
-        supabase.from("sales_cases").select("*").order("created_at", { ascending: false }),
+        supabase.rpc("get_ranking_sales_cases"),
         supabase
           .from("sales_case_payouts")
           .select("*")
@@ -479,6 +445,11 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
     return map;
   }, [payouts]);
 
+  const rankSummaryPayouts = useMemo(
+    () => payouts.filter((payout) => !payout.id.includes(":")),
+    [payouts]
+  );
+
   const currentProfile = profileMap.get(userId) ?? null;
   const canViewTeam = role === "agent" || role === "leader" || rank === "agent" || rank === "pre_leader" || rank === "leader";
   const normalizedRank = rank?.trim().toLowerCase().replace(/\s+/g, "_") ?? null;
@@ -553,365 +524,69 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
     const map = new Map<string, MemberRankSummary>();
 
     downlineProfiles.forEach((profile) => {
-      map.set(profile.id, getMemberRankSummary(profile, profiles, cases, payouts));
+      map.set(profile.id, getMemberRankSummary(profile, profiles, cases, rankSummaryPayouts));
     });
 
     return map;
-  }, [cases, downlineProfiles, payouts, profiles]);
+  }, [cases, downlineProfiles, profiles, rankSummaryPayouts]);
 
   const currentProfileSummary = useMemo(
-    () => (currentProfile ? getMemberRankSummary(currentProfile, profiles, cases, payouts) : null),
-    [cases, currentProfile, payouts, profiles]
+    () => (currentProfile ? getMemberRankSummary(currentProfile, profiles, cases, rankSummaryPayouts) : null),
+    [cases, currentProfile, profiles, rankSummaryPayouts]
+  );
+
+  const signedSpaCompleteCaseIds = useMemo(
+    () =>
+      new Set(
+        cases
+          .filter((record) => (record.signed_spa_status ?? "").trim().toLowerCase() === "complete")
+          .map((record) => record.id)
+      ),
+    [cases]
   );
 
   const voucherPersonalPointsByProfile = useMemo(() => {
     const map = new Map<string, number>();
-    const linkedPayoutIds = new Set<string>();
-    const payoutById = new Map<string, SalesCasePayoutRecord>();
-    const payoutProfileById = new Map<string, string>();
-    const payoutProfilesByReceiptUrl = new Map<string, Set<string>>();
-    const payoutRowByBaseId = new Map<string, SalesCasePayoutRecord>();
-    const payoutBaseIdsByReceiptUrl = new Map<string, Set<string>>();
-    const profileIdsByLabel = new Map<string, Set<string>>();
-    const componentKeySuffixes = ["-pre-leader-override", "-leader-override", "-comm"];
 
-    profiles.forEach((profile) => {
-      const labels = [normalizeLabel(profile.name), normalizeLabel(profile.email)].filter(Boolean);
-
-      labels.forEach((label) => {
-        const ids = profileIdsByLabel.get(label) ?? new Set<string>();
-        ids.add(profile.id);
-        profileIdsByLabel.set(label, ids);
-      });
-    });
-
-    payouts.forEach((payout) => {
-      if (!payout.id.includes(":")) {
-        payoutById.set(payout.id, payout);
-      }
-
-      const isEligibleVoucherPayout =
-        payout.payout_type === "standard" ||
-        payout.payout_type === "tier_upgrade_top_up" ||
-        isReleasedHoldingPayout(payout);
-
-      if (!isEligibleVoucherPayout) {
-        return;
-      }
-
-      const basePayoutId = payout.id.split(":")[0];
-
-      if (!payoutProfileById.has(basePayoutId)) {
-        payoutProfileById.set(basePayoutId, payout.profile_id);
-      }
-
-      if (!payoutRowByBaseId.has(basePayoutId) && !payout.id.includes(":")) {
-        payoutRowByBaseId.set(basePayoutId, payout);
-      }
-
-      if (!payoutRowByBaseId.has(basePayoutId)) {
-        payoutRowByBaseId.set(basePayoutId, payout);
-      }
-
-      if (payout.payment_receipt_url) {
-        const profileIds = payoutProfilesByReceiptUrl.get(payout.payment_receipt_url) ?? new Set<string>();
-        profileIds.add(payout.profile_id);
-        payoutProfilesByReceiptUrl.set(payout.payment_receipt_url, profileIds);
-
-        const payoutIds = payoutBaseIdsByReceiptUrl.get(payout.payment_receipt_url) ?? new Set<string>();
-        payoutIds.add(basePayoutId);
-        payoutBaseIdsByReceiptUrl.set(payout.payment_receipt_url, payoutIds);
-      }
-    });
-
-    const appendPersonalPoints = (profileId: string, amount: number) => {
-      map.set(profileId, Number(((map.get(profileId) ?? 0) + amount).toFixed(2)));
-    };
-
-    paymentVoucherEntries.forEach((entry) => {
-      const meta = parsePaymentVoucherMeta(entry.reference_detail);
-      const explicitProfileIds = Array.from(new Set((meta?.profileIds ?? []).filter(Boolean)));
-      const memberLabelProfileIds = Array.from(
-        new Set(
-          (meta?.memberLabels ?? [])
-            .flatMap((label) => Array.from(profileIdsByLabel.get(normalizeLabel(label)) ?? new Set<string>()))
-            .filter(Boolean)
-        )
-      );
-      const componentAllocations = new Map<string, number>();
-
-      (meta?.componentKeys ?? []).forEach((componentKey) => {
-        const matchedSuffix = componentKeySuffixes.find((suffix) => componentKey.endsWith(suffix));
-
-        if (matchedSuffix) {
-          const payoutId = componentKey.slice(0, -matchedSuffix.length);
-          const payoutRow = payoutById.get(payoutId);
-
-          if (!payoutRow || payoutRow.payout_type !== "standard") {
-            return;
-          }
-
-          const component = getStandardPayoutComponentRows(payoutRow).find((item) => item.key === componentKey);
-
-          if (!component) {
-            return;
-          }
-
-          const nextAmount = Number(((componentAllocations.get(payoutRow.profile_id) ?? 0) + Number(component.amount ?? 0)).toFixed(2));
-          componentAllocations.set(payoutRow.profile_id, nextAmount);
-            linkedPayoutIds.add(payoutRow.id);
-          return;
-        }
-
-        const payoutId = getPayoutIdFromComponentKey(componentKey) || componentKey;
-        const payoutRow = payoutById.get(payoutId);
-
-        if (!payoutRow) {
-          return;
-        }
-
-        const nextAmount = Number(((componentAllocations.get(payoutRow.profile_id) ?? 0) + Number(payoutRow.total_amount ?? 0)).toFixed(2));
-        componentAllocations.set(payoutRow.profile_id, nextAmount);
-          linkedPayoutIds.add(payoutRow.id);
-      });
-
-      if (componentAllocations.size > 0) {
-        const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-        const allocatedAmount = Number(
-          Array.from(componentAllocations.values())
-            .reduce((sum, amount) => sum + amount, 0)
-            .toFixed(2)
-        );
-        const scaleRatio = allocatedAmount > 0 ? grossAmount / allocatedAmount : 1;
-
-        Array.from(componentAllocations.entries()).forEach(([profileId, amount], index, list) => {
-          const isLast = index === list.length - 1;
-          const assignedBefore = Number(
-            list
-              .slice(0, index)
-              .reduce((sum, [, previousAmount]) => sum + Number((previousAmount * scaleRatio).toFixed(2)), 0)
-              .toFixed(2)
-          );
-          const scaledAmount = isLast
-            ? Number((grossAmount - assignedBefore).toFixed(2))
-            : Number((amount * scaleRatio).toFixed(2));
-
-          appendPersonalPoints(profileId, scaledAmount);
-        });
-
-        return;
-      }
-
-      const componentPayoutIds = Array.from(
-        new Set(
-          (meta?.componentKeys ?? [])
-            .map((componentKey) => getPayoutIdFromComponentKey(componentKey))
-            .filter((payoutId): payoutId is string => Boolean(payoutId))
-        )
-      );
-
-      if (componentPayoutIds.length > 0) {
-        const payoutAmountByProfile = new Map<string, number>();
-
-        componentPayoutIds.forEach((payoutId) => {
-          const payoutRow = payoutRowByBaseId.get(payoutId);
-
-          if (!payoutRow) {
-            return;
-          }
-
-          const nextAmount = Number(
-            ((payoutAmountByProfile.get(payoutRow.profile_id) ?? 0) + Number(payoutRow.total_amount ?? 0)).toFixed(2)
-          );
-          payoutAmountByProfile.set(payoutRow.profile_id, nextAmount);
-          linkedPayoutIds.add(payoutId);
-        });
-
-        if (payoutAmountByProfile.size > 0) {
-          const preferredProfileIds =
-            explicitProfileIds.length > 0
-              ? explicitProfileIds
-              : memberLabelProfileIds.length > 0
-                ? memberLabelProfileIds
-                : Array.from(payoutAmountByProfile.keys());
-          const filteredEntries = Array.from(payoutAmountByProfile.entries()).filter(([profileId]) =>
-            preferredProfileIds.includes(profileId)
-          );
-          const allocationEntries = filteredEntries.length > 0 ? filteredEntries : Array.from(payoutAmountByProfile.entries());
-          const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-          const allocatedAmount = Number(
-            allocationEntries
-              .reduce((sum, [, amount]) => sum + amount, 0)
-              .toFixed(2)
-          );
-          const scaleRatio = allocatedAmount > 0 ? grossAmount / allocatedAmount : 1;
-
-          allocationEntries.forEach(([profileId, amount], index, list) => {
-            const isLast = index === list.length - 1;
-            const assignedBefore = Number(
-              list
-                .slice(0, index)
-                .reduce((sum, [, previousAmount]) => sum + Number((previousAmount * scaleRatio).toFixed(2)), 0)
-                .toFixed(2)
-            );
-            const scaledAmount = isLast
-              ? Number((grossAmount - assignedBefore).toFixed(2))
-              : Number((amount * scaleRatio).toFixed(2));
-
-            appendPersonalPoints(profileId, scaledAmount);
-          });
-
-          return;
-        }
-      }
-
-      if (explicitProfileIds.length > 0) {
-        const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-        const shareAmount = Number((grossAmount / explicitProfileIds.length).toFixed(2));
-
-        explicitProfileIds.forEach((profileId) => {
-          appendPersonalPoints(profileId, shareAmount);
-        });
-
-        return;
-      }
-
-      if (memberLabelProfileIds.length > 0) {
-        const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-        const shareAmount = Number((grossAmount / memberLabelProfileIds.length).toFixed(2));
-
-        memberLabelProfileIds.forEach((profileId) => {
-          appendPersonalPoints(profileId, shareAmount);
-        });
-
-        return;
-      }
-
-      const receiptPayoutIds = entry.attachment_url
-        ? Array.from(payoutBaseIdsByReceiptUrl.get(entry.attachment_url) ?? new Set<string>())
-        : [];
-
-      if (receiptPayoutIds.length > 0) {
-        const payoutAmountByProfile = new Map<string, number>();
-
-        receiptPayoutIds.forEach((payoutId) => {
-          const payoutRow = payoutRowByBaseId.get(payoutId);
-
-          if (!payoutRow) {
-            return;
-          }
-
-          const nextAmount = Number(
-            ((payoutAmountByProfile.get(payoutRow.profile_id) ?? 0) + Number(payoutRow.total_amount ?? 0)).toFixed(2)
-          );
-          payoutAmountByProfile.set(payoutRow.profile_id, nextAmount);
-          linkedPayoutIds.add(payoutId);
-        });
-
-        if (payoutAmountByProfile.size > 0) {
-          const preferredProfileIds =
-            explicitProfileIds.length > 0
-              ? explicitProfileIds
-              : memberLabelProfileIds.length > 0
-                ? memberLabelProfileIds
-                : Array.from(payoutAmountByProfile.keys());
-          const filteredEntries = Array.from(payoutAmountByProfile.entries()).filter(([profileId]) =>
-            preferredProfileIds.includes(profileId)
-          );
-          const allocationEntries = filteredEntries.length > 0 ? filteredEntries : Array.from(payoutAmountByProfile.entries());
-          const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-          const allocatedAmount = Number(
-            allocationEntries
-              .reduce((sum, [, amount]) => sum + amount, 0)
-              .toFixed(2)
-          );
-          const scaleRatio = allocatedAmount > 0 ? grossAmount / allocatedAmount : 1;
-
-          allocationEntries.forEach(([profileId, amount], index, list) => {
-            const isLast = index === list.length - 1;
-            const assignedBefore = Number(
-              list
-                .slice(0, index)
-                .reduce((sum, [, previousAmount]) => sum + Number((previousAmount * scaleRatio).toFixed(2)), 0)
-                .toFixed(2)
-            );
-            const scaledAmount = isLast
-              ? Number((grossAmount - assignedBefore).toFixed(2))
-              : Number((amount * scaleRatio).toFixed(2));
-
-            appendPersonalPoints(profileId, scaledAmount);
-          });
-        }
-
-        return;
-      }
-
-      const profileIds = new Set<string>((meta?.profileIds ?? []).filter(Boolean));
-
-      if (profileIds.size === 0) {
-        (meta?.componentKeys ?? []).forEach((componentKey) => {
-          const payoutId = getPayoutIdFromComponentKey(componentKey);
-          const profileId = payoutId ? payoutProfileById.get(payoutId) : null;
-
-          if (profileId) {
-            profileIds.add(profileId);
-          }
-        });
-      }
-
-      if (profileIds.size === 0 && entry.attachment_url) {
-        (payoutProfilesByReceiptUrl.get(entry.attachment_url) ?? new Set<string>()).forEach((profileId) => {
-          if (profileId) {
-            profileIds.add(profileId);
-          }
-        });
-      }
-
-      if (profileIds.size === 0) {
-        (meta?.memberLabels ?? []).forEach((label) => {
-          const normalizedLabel = normalizeLabel(label);
-
-          if (!normalizedLabel) {
-            return;
-          }
-
-          (profileIdsByLabel.get(normalizedLabel) ?? new Set<string>()).forEach((profileId) => {
-            if (profileId) {
-              profileIds.add(profileId);
-            }
-          });
-        });
-      }
-
-      const resolvedProfileIds = Array.from(profileIds);
-
-      if (resolvedProfileIds.length === 0) {
-        return;
-      }
-
-      const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-      const shareAmount = Number((grossAmount / resolvedProfileIds.length).toFixed(2));
-
-      resolvedProfileIds.forEach((profileId) => {
-        appendPersonalPoints(profileId, shareAmount);
-      });
-    });
-
+    // Fallback credits: Signed SPA complete cases where this viewer cannot see a member's standard payout row yet.
+    const visibleStandardPayouts =
       payouts
+        .filter((payout) => payout.payout_type === "standard")
         .filter((payout) => !payout.id.includes(":"))
-        .filter((payout) => payout.payout_type === "tier_upgrade_top_up")
-        .filter((payout) => payout.payout_status === "Paid")
-        .filter((payout) => Boolean(payout.payment_receipt_url))
-        .forEach((payout) => {
-          if (linkedPayoutIds.has(payout.id)) {
+        .filter((payout) => payout.payout_status !== "Reject");
+
+    const memberProfileIds = profiles
+      .filter((profile) => isMemberProfile(profile))
+      .map((profile) => profile.id);
+
+    cases
+      .filter((record) => signedSpaCompleteCaseIds.has(record.id))
+      .forEach((record) => {
+        const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+
+        memberProfileIds.forEach((profileId) => {
+          const hasVisibleStandardPayout = visibleStandardPayouts.some(
+            (payout) => payout.sales_case_id === record.id && payout.profile_id === profileId
+          );
+
+          if (hasVisibleStandardPayout) {
             return;
           }
 
-          appendPersonalPoints(payout.profile_id, Number(Number(payout.total_amount ?? 0).toFixed(2)));
+          const fallbackAmount = Number(
+            getCaseCommissionAmountForProfile(record, project, profiles, profileId).toFixed(2)
+          );
+
+          if (!Number.isFinite(fallbackAmount) || fallbackAmount <= 0) {
+            return;
+          }
+
+          map.set(profileId, Number(((map.get(profileId) ?? 0) + fallbackAmount).toFixed(2)));
         });
+      });
 
     return map;
-  }, [paymentVoucherEntries, payouts, profiles]);
+  }, [cases, payouts, profiles, projectMap, signedSpaCompleteCaseIds]);
 
   const voucherGroupPointsByProfile = useMemo(() => {
     const map = new Map<string, number>();
@@ -1510,6 +1185,55 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
   const shouldShowUpgradeNotice = (summary: MemberRankSummary | null | undefined) =>
     Boolean(summary && summary.rank === "agent" && summary.eligibleRank === "pre_leader");
 
+  const getSummaryWithFallbackPoints = (
+    summary: MemberRankSummary | undefined,
+    profileId: string
+  ): MemberRankSummary | undefined => {
+    if (!summary) {
+      return undefined;
+    }
+
+    const personalPoints = Number(
+      (summary.personalPoints + (voucherPersonalPointsByProfile.get(profileId) ?? 0)).toFixed(2)
+    );
+    const groupPoints = Number(
+      (summary.groupPoints + (voucherGroupPointsByProfile.get(profileId) ?? 0)).toFixed(2)
+    );
+
+    let eligibleRank = summary.eligibleRank;
+
+    if (personalPoints >= 300000 && groupPoints >= 100000) {
+      eligibleRank = "leader";
+    } else if (personalPoints >= 120000 && summary.directRecruitCount >= 3) {
+      eligibleRank = "pre_leader";
+    } else {
+      eligibleRank = "agent";
+    }
+
+    return {
+      ...summary,
+      personalPoints,
+      groupPoints,
+      eligibleRank,
+    };
+  };
+
+  const openCaseModalWithLatestData = async (caseId: string) => {
+    const fallbackCase = cases.find((item) => item.id === caseId) ?? null;
+
+    const { data, error: fetchError } = await supabase.rpc("get_ranking_sales_cases");
+
+    if (fetchError) {
+      setSelectedCase(fallbackCase);
+      setIsCaseModalOpen(true);
+      return;
+    }
+
+    const latestCase = ((data as SalesCaseRecord[]) ?? []).find((item) => item.id === caseId) ?? fallbackCase;
+    setSelectedCase(latestCase);
+    setIsCaseModalOpen(true);
+  };
+
   if (!canViewTeam) {
     return (
       <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
@@ -1529,36 +1253,45 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
             <p className="mt-1 text-sm text-gray-500">View your current rank progress before reviewing your team.</p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            {(() => {
+              const summary = getSummaryWithFallbackPoints(currentProfileSummary, currentProfile.id);
+
+              if (!summary) {
+                return null;
+              }
+
+              return (
+                <>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="font-semibold text-gray-900">{currentProfile.name || currentProfile.email || "My profile"}</p>
-                <p className="mt-1 text-sm text-gray-500">Current rank: {formatRankLabel(currentProfileSummary.rank)}</p>
+                <p className="mt-1 text-sm text-gray-500">Current rank: {formatRankLabel(summary.rank)}</p>
                 <p className="mt-1 text-sm text-gray-500">
                   Recruited by: {currentProfile.recruit_by ? profileMap.get(currentProfile.recruit_by)?.name || profileMap.get(currentProfile.recruit_by)?.email || "-" : "-"}
                 </p>
               </div>
               <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600">
-                {formatRankLabel(currentProfileSummary.rank)}
+                {formatRankLabel(summary.rank)}
               </span>
             </div>
 
             <div className="mt-4 space-y-3">
-              {shouldShowUpgradeNotice(currentProfileSummary) && (
+              {shouldShowUpgradeNotice(summary) && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
                   🎉 CONGRATULATIONS! YOU DID IT! Please reach out to admin to get your rank upgraded.
                 </div>
               )}
               <p className="text-sm font-medium text-gray-700">
-                {getNextRankTarget(currentProfileSummary.rank).isHighestRank
-                  ? `Highest rank benchmark: ${formatRankLabel(getNextRankTarget(currentProfileSummary.rank).nextRank)}`
-                  : `Next rank: ${formatRankLabel(getNextRankTarget(currentProfileSummary.rank).nextRank)}`}
+                {getNextRankTarget(summary.rank).isHighestRank
+                  ? `Highest rank benchmark: ${formatRankLabel(getNextRankTarget(summary.rank).nextRank)}`
+                  : `Next rank: ${formatRankLabel(getNextRankTarget(summary.rank).nextRank)}`}
               </p>
-              {getNextRankTarget(currentProfileSummary.rank).requirements.map((requirement) => {
+              {getNextRankTarget(summary.rank).requirements.map((requirement) => {
                 const currentValue = requirement.key === "personal"
-                  ? currentProfileSummary.personalPoints + (voucherPersonalPointsByProfile.get(currentProfile.id) ?? 0)
+                  ? summary.personalPoints
                   : requirement.key === "group"
-                    ? currentProfileSummary.groupPoints + (voucherGroupPointsByProfile.get(currentProfile.id) ?? 0)
-                    : currentProfileSummary.directRecruitCount;
+                    ? summary.groupPoints
+                    : summary.directRecruitCount;
                 const progress = Math.min((currentValue / requirement.target) * 100, 100);
 
                 return (
@@ -1574,6 +1307,9 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
                 );
               })}
             </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1681,7 +1417,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {filteredDownlineProfiles.map((profile) => {
-              const summary = downlineRankSummaries.get(profile.id);
+              const summary = getSummaryWithFallbackPoints(downlineRankSummaries.get(profile.id), profile.id);
               const target = getNextRankTarget(summary?.rank ?? profile.rank);
               const recruiterLabel = profile.recruit_by
                 ? profileMap.get(profile.recruit_by)?.name || profileMap.get(profile.recruit_by)?.email || "-"
@@ -1713,9 +1449,9 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
                     </p>
                     {target.requirements.map((requirement) => {
                       const currentValue = requirement.key === "personal"
-                        ? (summary?.personalPoints ?? 0) + (voucherPersonalPointsByProfile.get(profile.id) ?? 0)
+                        ? (summary?.personalPoints ?? 0)
                         : requirement.key === "group"
-                          ? (summary?.groupPoints ?? 0) + (voucherGroupPointsByProfile.get(profile.id) ?? 0)
+                          ? (summary?.groupPoints ?? 0)
                           : summary?.directRecruitCount ?? 0;
                       const progress = Math.min((currentValue / requirement.target) * 100, 100);
 
@@ -1851,9 +1587,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
                       <button
                         type="button"
                         onClick={() => {
-                          const record = cases.find((item) => item.id === row.id) ?? null;
-                          setSelectedCase(record);
-                          setIsCaseModalOpen(true);
+                          void openCaseModalWithLatestData(row.id);
                         }}
                         className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
                       >

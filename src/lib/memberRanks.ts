@@ -14,6 +14,7 @@ export type RankCase = {
   created_by: string | null;
   involved_user_ids: string[] | null;
   status: string | null;
+  signed_spa_status: string | null;
 };
 
 export type RankPayout = {
@@ -34,7 +35,7 @@ export type MemberRankSummary = {
 };
 
 const MEMBER_ROLES = new Set(["agent", "leader"]);
-const COMPLETED_CASE_STATUSES = new Set(["Paid", "Completed"]);
+const COMPLETED_SIGNED_SPA_STATUSES = new Set(["Complete"]);
 const getStoredPersonalPoints = (profile: Pick<RankProfile, "personal_points">) =>
   Number(profile.personal_points ?? 0);
 
@@ -57,7 +58,7 @@ export const getDirectRecruitCount = (profileId: string, profiles: RankProfile[]
 export const getCompletedRelatedCaseCount = (profileId: string, cases: RankCase[]) =>
   cases.filter(
     (record) =>
-      COMPLETED_CASE_STATUSES.has(record.status ?? "") &&
+      COMPLETED_SIGNED_SPA_STATUSES.has(record.signed_spa_status ?? "") &&
       (record.created_by === profileId || (record.involved_user_ids ?? []).includes(profileId))
   ).length;
 
@@ -75,21 +76,38 @@ export const getCompletedCaseIds = (cases: RankCase[], payouts: RankPayout[]) =>
   return new Set(
     cases
       .filter((record) => {
+        if (!COMPLETED_SIGNED_SPA_STATUSES.has(record.signed_spa_status ?? "")) {
+          return false;
+        }
+
         const relatedPayouts = standardPayoutsByCase.get(record.id) ?? [];
-        return relatedPayouts.length > 0 && relatedPayouts.every((payout) => payout.payout_status === "Paid");
+
+        if (relatedPayouts.length === 0) {
+          return false;
+        }
+
+        return relatedPayouts.some((payout) => payout.payout_status !== "Reject");
       })
       .map((record) => record.id)
   );
 };
 
 export const getEarnedPersonalPoints = (profileId: string, cases: RankCase[], payouts: RankPayout[]) => {
+  const signedSpaCompletedCaseIds = new Set(
+    cases
+      .filter((record) => COMPLETED_SIGNED_SPA_STATUSES.has(record.signed_spa_status ?? ""))
+      .map((record) => record.id)
+  );
   const completedCaseIds = getCompletedCaseIds(cases, payouts);
 
   return payouts.reduce((sum, payout) => {
+    const isSignedSpaCompletedCase = signedSpaCompletedCaseIds.has(payout.sales_case_id);
+    const hasEligiblePayoutStatus = isSignedSpaCompletedCase && payout.payout_status !== "Reject";
+
     if (
       payout.profile_id !== profileId ||
       payout.payout_type !== "standard" ||
-      payout.payout_status !== "Paid" ||
+      !hasEligiblePayoutStatus ||
       !completedCaseIds.has(payout.sales_case_id)
     ) {
       return sum;

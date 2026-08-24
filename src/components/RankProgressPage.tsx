@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { getCompletedCaseIds, getMemberRankSummary, type MemberRank, type MemberRankSummary, type RankCase, type RankPayout, type RankProfile } from "../lib/memberRanks";
+import { getCaseCommissionAmountForProfile } from "../lib/salesCaseMetrics";
 import { SalesCaseModal, getCaseStatusClasses, type ProjectOption, type SalesCaseRecord } from "./SalesCaseModal";
 
 type ProgressProfile = RankProfile & {
@@ -36,18 +37,6 @@ type ProgressPayout = RankPayout & {
   email?: string | null;
   is_active?: boolean | null;
   role?: string | null;
-};
-
-type PaymentVoucherFinanceEntry = {
-  amount: number;
-  attachment_url: string | null;
-  reference_detail: string | null;
-};
-
-type PaymentVoucherMeta = {
-  profileIds?: string[];
-  componentKeys?: string[];
-  grossAmount?: number;
 };
 
 const DEFAULT_AVATAR_URL = "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas";
@@ -143,72 +132,6 @@ const getNextRankTarget = (rank: MemberRank) => {
 };
 
 const rankOrder = new Map<MemberRank, number>(RANK_DISPLAY_ORDER.map((rank, index) => [rank, index]));
-const HISTORY_META_SEPARATOR = "|||META|||";
-
-const parsePaymentVoucherMeta = (referenceDetail: string | null | undefined) => {
-  const rawDetail = (referenceDetail ?? "").trim();
-  const [, metaPayload] = rawDetail.split(HISTORY_META_SEPARATOR);
-
-  if (!metaPayload) {
-    return null;
-  }
-
-  try {
-    const [metaJson] = metaPayload.split(" | ");
-    return JSON.parse(metaJson) as PaymentVoucherMeta;
-  } catch {
-    return null;
-  }
-};
-
-const deriveGrossAmountFromHistory = (finalAmount: number, referenceDetail: string | null | undefined) => {
-  const meta = parsePaymentVoucherMeta(referenceDetail);
-
-  if (meta?.grossAmount !== undefined && meta.grossAmount !== null) {
-    return Number(Number(meta.grossAmount).toFixed(2));
-  }
-
-  const normalizedDetail = (referenceDetail ?? "").toLowerCase();
-  const hasSst = normalizedDetail.includes("deduct sst 8%");
-  const hasWht =
-    normalizedDetail.includes("deduct wht 2%") ||
-    normalizedDetail.includes("deduct withholding tax 2%");
-
-  if (hasSst && hasWht) {
-    return Number(((finalAmount * 1.08) / 0.98).toFixed(2));
-  }
-
-  if (hasSst) {
-    return Number((finalAmount * 1.08).toFixed(2));
-  }
-
-  if (hasWht) {
-    return Number((finalAmount / 0.98).toFixed(2));
-  }
-
-  return Number(finalAmount.toFixed(2));
-};
-
-const getPayoutIdFromComponentKey = (componentKey: string) => {
-  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(componentKey)) {
-    return componentKey;
-  }
-
-  const uuidPrefixMatch = componentKey.match(/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})-/);
-
-  if (uuidPrefixMatch?.[1]) {
-    return uuidPrefixMatch[1];
-  }
-
-  const suffixes = ["-pre-leader-override", "-leader-override", "-comm"];
-  const matchedSuffix = suffixes.find((suffix) => componentKey.endsWith(suffix));
-
-  if (!matchedSuffix) {
-    return null;
-  }
-
-  return componentKey.slice(0, -matchedSuffix.length);
-};
 
 const isHigherRankAchieved = (summary: MemberRankSummary) => {
   const currentOrder = rankOrder.get(summary.rank) ?? Number.POSITIVE_INFINITY;
@@ -256,7 +179,6 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
   const [profiles, setProfiles] = useState<ProgressProfile[]>([]);
   const [rankCases, setRankCases] = useState<RankCase[]>([]);
   const [rankPayouts, setRankPayouts] = useState<ProgressPayout[]>([]);
-  const [paymentVoucherEntries, setPaymentVoucherEntries] = useState<PaymentVoucherFinanceEntry[]>([]);
   const [cases, setCases] = useState<SalesCaseRecord[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedRank, setSelectedRank] = useState<"all" | MemberRank>("all");
@@ -276,14 +198,14 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
     const loadData = async () => {
       setError(null);
 
-      const [profileResult, rankCaseResult, payoutResult, caseResult, projectResult, paymentVoucherEntryResult] = await Promise.all([
+      const [profileResult, rankCaseResult, payoutResult, caseResult, projectResult] = await Promise.all([
         supabase
           .from("profiles")
           .select(
             "id, name, email, role, rank, recruit_by, personal_points, group_points, is_active, avatar_url, avatar_position_x, avatar_position_y, avatar_zoom"
           )
           .is("deleted_at", null),
-        supabase.from("sales_cases").select("id, created_by, involved_user_ids, status"),
+        supabase.from("sales_cases").select("id, created_by, involved_user_ids, status, signed_spa_status"),
         supabase.from("sales_case_payouts").select("id, sales_case_id, profile_id, payout_type, payout_status, total_amount, paid_at, payment_receipt_url"),
         supabase.from("sales_cases").select("*").order("created_at", { ascending: false }),
         supabase
@@ -292,10 +214,6 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
             "id, project_name, company_commission, agent_commission, pre_leader_override, leader_override, commission_structures, default_commission_structure_id"
           )
           .eq("is_hidden", false),
-        supabase
-          .from("finance_entries")
-          .select("amount, attachment_url, reference_detail")
-          .eq("description", "Payment voucher generated"),
       ]);
 
       if (profileResult.error) {
@@ -323,15 +241,9 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
         return;
       }
 
-      if (paymentVoucherEntryResult.error) {
-        setError(paymentVoucherEntryResult.error.message);
-        return;
-      }
-
       setProfiles((profileResult.data as ProgressProfile[]) ?? []);
       setRankCases((rankCaseResult.data as RankCase[]) ?? []);
       setRankPayouts((payoutResult.data as ProgressPayout[]) ?? []);
-      setPaymentVoucherEntries((paymentVoucherEntryResult.data as PaymentVoucherFinanceEntry[]) ?? []);
       setCases((caseResult.data as SalesCaseRecord[]) ?? []);
       setProjects((projectResult.data as ProjectOption[]) ?? []);
     };
@@ -372,56 +284,47 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
 
   const voucherPersonalPointsByProfile = useMemo(() => {
     const map = new Map<string, number>();
-    const payoutById = new Map(rankPayouts.map((payout) => [payout.id, payout]));
-    const payoutProfilesByReceiptUrl = new Map<string, Set<string>>();
-
-    rankPayouts.forEach((payout) => {
-      if (!payout.payment_receipt_url) {
-        return;
-      }
-
-      const ids = payoutProfilesByReceiptUrl.get(payout.payment_receipt_url) ?? new Set<string>();
-      ids.add(payout.profile_id);
-      payoutProfilesByReceiptUrl.set(payout.payment_receipt_url, ids);
-    });
 
     const appendPoints = (profileId: string, amount: number) => {
       map.set(profileId, Number(((map.get(profileId) ?? 0) + amount).toFixed(2)));
     };
 
-    paymentVoucherEntries.forEach((entry) => {
-      const meta = parsePaymentVoucherMeta(entry.reference_detail);
-      const profileIds = new Set<string>((meta?.profileIds ?? []).filter(Boolean));
+    // Fallback credits for Signed SPA completed cases without standard payout rows yet.
+    const signedSpaCompletedCaseIds = new Set(
+      cases
+        .filter((record) => (record.signed_spa_status ?? "").trim().toLowerCase() === "complete")
+        .map((record) => record.id)
+    );
 
-      (meta?.componentKeys ?? []).forEach((componentKey) => {
-        const payoutId = getPayoutIdFromComponentKey(componentKey);
-        const profileId = payoutId ? payoutById.get(payoutId)?.profile_id : null;
+    const standardPayoutCaseIds = new Set(
+      rankPayouts
+        .filter((payout) => payout.payout_type === "standard")
+        .map((payout) => payout.sales_case_id)
+    );
 
-        if (profileId) {
-          profileIds.add(profileId);
-        }
+    const projectMap = new Map(projects.map((project) => [project.id, project]));
+
+    cases
+      .filter((record) => signedSpaCompletedCaseIds.has(record.id))
+      .filter((record) => !standardPayoutCaseIds.has(record.id))
+      .forEach((record) => {
+        const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
+
+        memberProfiles.forEach((profile) => {
+          const fallbackAmount = Number(
+            getCaseCommissionAmountForProfile(record, project, memberProfiles, profile.id).toFixed(2)
+          );
+
+          if (!Number.isFinite(fallbackAmount) || fallbackAmount <= 0) {
+            return;
+          }
+
+          appendPoints(profile.id, fallbackAmount);
+        });
       });
 
-      if (profileIds.size === 0 && entry.attachment_url) {
-        (payoutProfilesByReceiptUrl.get(entry.attachment_url) ?? new Set<string>()).forEach((profileId) => {
-          profileIds.add(profileId);
-        });
-      }
-
-      const resolvedProfileIds = Array.from(profileIds);
-
-      if (resolvedProfileIds.length === 0) {
-        return;
-      }
-
-      const grossAmount = deriveGrossAmountFromHistory(entry.amount ?? 0, entry.reference_detail);
-      const shareAmount = Number((grossAmount / resolvedProfileIds.length).toFixed(2));
-
-      resolvedProfileIds.forEach((profileId) => appendPoints(profileId, shareAmount));
-    });
-
     return map;
-  }, [paymentVoucherEntries, rankPayouts]);
+  }, [cases, memberProfiles, projects, rankPayouts]);
 
   const voucherGroupPointsByProfile = useMemo(() => {
     const map = new Map<string, number>();
