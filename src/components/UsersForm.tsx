@@ -1286,7 +1286,7 @@ export function UsersForm() {
                     }}
                     className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none bg-white"
                   >
-                    {roleOptions.map((option) => (
+                    {roleOptions.filter((option) => option !== "leader").map((option) => (
                       <option key={option} value={option}>
                         {option.replace("_", " ")}
                       </option>
