@@ -485,6 +485,17 @@ const getAmountFromReleasePercentage = (
   return Number(Math.min(proportionalAmount, remainingAmount).toFixed(2));
 };
 
+const getReleasePercentageFromAmount = (
+  component: VoucherComponentBreakdown,
+  amount: number
+) => {
+  if (component.percentage <= 0 || component.amount <= 0 || amount <= 0) {
+    return 0;
+  }
+
+  return Number(((amount / component.amount) * component.percentage).toFixed(3));
+};
+
 export function PaymentVoucherPage({
   userId,
   canGenerateVoucher = true,
@@ -1142,16 +1153,22 @@ export function PaymentVoucherPage({
           Number.isFinite(typedAmount) && typedAmount > 0
             ? Math.min(typedAmount, remainingAmount)
             : remainingAmount;
+        const typedReleasePercentage = Number(batchReleasePercentByComponentKey[componentKey]);
+        const maxReleasePercentage = getRemainingPercentage(component, remainingAmount);
+        const normalizedReleasePercentage =
+          Number.isFinite(typedReleasePercentage) && typedReleasePercentage >= 0
+            ? Number(Math.min(typedReleasePercentage, maxReleasePercentage).toFixed(3))
+            : Number(Math.min(getReleasePercentageFromAmount(component, normalizedAmount), maxReleasePercentage).toFixed(3));
 
         return {
         ...row,
         id: componentKey,
-        commissionPercentage: component.percentage,
+        commissionPercentage: normalizedReleasePercentage,
         amount: Number(normalizedAmount.toFixed(2)),
         componentCategory: component.componentCategory,
       };
       }),
-    [batchAmountsByComponentKey, selectedComponentRows]
+    [batchAmountsByComponentKey, batchReleasePercentByComponentKey, selectedComponentRows]
   );
 
   const toggleExpand = (salesCaseId: string) => {
@@ -1636,12 +1653,22 @@ export function PaymentVoucherPage({
 
     const payableRows = selectedComponentRows.map(({ componentKey, row, component }) => {
       const matchedPayment = selectedComponentPayments.find((item) => item.componentKey === componentKey);
+      const paymentAmount = matchedPayment ? matchedPayment.amount : component.amount;
+      const typedReleasePercentage = Number(batchReleasePercentByComponentKey[componentKey]);
+      const maxReleasePercentage = getRemainingPercentage(
+        component,
+        matchedPayment ? matchedPayment.remainingAmount : component.amount
+      );
+      const releasePercentage =
+        Number.isFinite(typedReleasePercentage) && typedReleasePercentage >= 0
+          ? Number(Math.min(typedReleasePercentage, maxReleasePercentage).toFixed(3))
+          : Number(Math.min(getReleasePercentageFromAmount(component, paymentAmount), maxReleasePercentage).toFixed(3));
 
       return {
         ...row,
         id: componentKey,
-        commissionPercentage: component.percentage,
-        amount: matchedPayment ? matchedPayment.amount : component.amount,
+        commissionPercentage: releasePercentage,
+        amount: paymentAmount,
         componentCategory: component.componentCategory,
       };
     });
