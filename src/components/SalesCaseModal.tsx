@@ -1335,15 +1335,6 @@ export function SalesCaseModal({
         return;
       }
 
-      const requiresSignedSpaAttachment =
-        nextSignedSpaStatus === "Submit" || nextSignedSpaStatus === "Complete";
-
-      if (enableWorkflowFields && requiresSignedSpaAttachment && !Boolean(signedSpaFile || signedSpaUrl)) {
-        setError("Please upload the Signed SPA attachment before setting Signed SPA status to Submit or Complete.");
-        setIsSubmitting(false);
-        return;
-      }
-
       const hasSignedLoAttachment = Boolean(loDraftFile || loDraftUrl);
       const signedLoDate = formData.signedLoDate.trim();
 

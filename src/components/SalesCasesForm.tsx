@@ -1356,7 +1356,6 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
           allowStatusEdit={caseWorkflowEnabled && !isReadOnlyModal}
           allowLoDraftUpload={caseWorkflowEnabled && !isReadOnlyModal}
           signedSpaOptions={MEMBER_SIGNED_SPA_OPTIONS}
-          lockSignedSpaWhenComplete
           onClose={() => {
             setIsModalOpen(false);
             setIsReadOnlyModal(false);
