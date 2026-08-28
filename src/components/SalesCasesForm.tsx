@@ -474,7 +474,43 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
       return;
     }
 
-    setCases((caseResult.data as SalesCaseRecord[]) ?? []);
+    const rpcCases = (caseResult.data as SalesCaseRecord[]) ?? [];
+    const caseIds = rpcCases.map((record) => record.id).filter(Boolean);
+
+    if (caseIds.length === 0) {
+      setCases(rpcCases);
+      return;
+    }
+
+    const { data: detailedCases, error: detailedCasesError } = await supabase
+      .from("sales_cases")
+      .select("*")
+      .in("id", caseIds);
+
+    if (detailedCasesError) {
+      console.warn("Unable to fetch extended case fields; falling back to RPC payload.", detailedCasesError);
+      setCases(rpcCases);
+      return;
+    }
+
+    const detailedCaseById = new Map(
+      ((detailedCases as SalesCaseRecord[]) ?? []).map((record) => [record.id, record])
+    );
+
+    setCases(
+      rpcCases.map((record) => {
+        const detailedRecord = detailedCaseById.get(record.id);
+
+        if (!detailedRecord) {
+          return record;
+        }
+
+        return {
+          ...record,
+          ...detailedRecord,
+        };
+      })
+    );
   };
 
   const fetchPayouts = async () => {
