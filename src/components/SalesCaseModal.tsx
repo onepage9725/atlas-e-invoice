@@ -465,6 +465,17 @@ const createEmptyCustomerDetail = (): CustomerDetail => ({
   icUrl: "",
 });
 
+const splitLegacyCustomerField = (value: string | null | undefined) => {
+  if (!value) {
+    return [] as string[];
+  }
+
+  return value
+    .split(" / ")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+};
+
 const normalizeCustomerDetails = (value: unknown): CustomerDetail[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -524,6 +535,34 @@ const getInitialCustomerDetails = (record: SalesCaseRecord | null): CustomerDeta
     }
 
     return fromJson;
+  }
+
+  const names = splitLegacyCustomerField(record.customer_name);
+  const ids = splitLegacyCustomerField(record.customer_id);
+  const contactNumbers = splitLegacyCustomerField(record.customer_contact_number);
+  const emails = splitLegacyCustomerField(record.customer_email);
+  const addresses = splitLegacyCustomerField(record.customer_address);
+  const icUrls = splitLegacyCustomerField(record.customer_ic_url);
+
+  const inferredLength = Math.max(
+    names.length,
+    ids.length,
+    contactNumbers.length,
+    emails.length,
+    addresses.length,
+    icUrls.length,
+    1,
+  );
+
+  if (inferredLength > 1) {
+    return Array.from({ length: inferredLength }, (_, index) => ({
+      name: names[index] ?? "",
+      id: ids[index] ?? "",
+      contactNumber: contactNumbers[index] ?? contactNumbers[0] ?? "",
+      email: emails[index] ?? emails[0] ?? "",
+      address: addresses[index] ?? addresses[0] ?? "",
+      icUrl: icUrls[index] ?? "",
+    }));
   }
 
   return [
