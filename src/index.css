@@ -55,3 +55,17 @@ textarea::placeholder {
   transform-origin: center;
   animation: footer-heartbeat 1.25s ease-in-out infinite;
 }
+
+@media (min-width: 768px) {
+  .sidebar-collapsed [class*="md:ml-[220px]"] {
+    margin-left: 0 !important;
+  }
+
+  .sidebar-collapsed [class*="md:w-[calc(100%-220px)]"] {
+    width: 100% !important;
+  }
+
+  .sidebar-collapsed [class*="md:left-[220px]"] {
+    left: 0 !important;
+  }
+}

@@ -67,6 +67,7 @@ const isFirstLoginPasswordChangeRequired = (metadata: unknown) => {
 function App() {
   const [activeView, setActiveView] = useState("Dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [profileRole, setProfileRole] = useState<string | null>(null);
@@ -273,6 +274,15 @@ function App() {
     setIsSidebarOpen(false);
   };
 
+  const handleSidebarToggle = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+      setIsSidebarCollapsed((current) => !current);
+      return;
+    }
+
+    setIsSidebarOpen((current) => !current);
+  };
+
   const handleProfileUpdated = (
     name: string | null,
     avatarUrl: string | null,
@@ -407,7 +417,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-body)] flex flex-col">
+    <div className={`min-h-screen bg-[var(--color-body)] flex flex-col ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <Sidebar
         activeView={activeView}
         setActiveView={handleSetActiveView}
@@ -428,6 +438,7 @@ function App() {
         canViewFinance={canViewFinance}
         canViewEInvoice={canViewEInvoice}
         isOpen={isSidebarOpen}
+        isDesktopCollapsed={isSidebarCollapsed}
         onClose={() => setIsSidebarOpen(false)}
       />
       <Header
@@ -442,7 +453,8 @@ function App() {
         onNotificationClick={handleSetActiveView}
         onProfileClick={() => setActiveView("Profile")}
         onSignOut={handleSignOut}
-        onMenuClick={() => setIsSidebarOpen((current) => !current)}
+        onMenuClick={handleSidebarToggle}
+        isSidebarCollapsed={isSidebarCollapsed}
       />
       <main className="flex-1">
         {activeView === "Dashboard" && (

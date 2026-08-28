@@ -22,6 +22,7 @@ interface SidebarProps {
   canViewEInvoice: boolean;
   canViewUsers: boolean;
   isOpen: boolean;
+  isDesktopCollapsed: boolean;
   onClose: () => void;
 }
 
@@ -71,6 +72,7 @@ export function Sidebar({
   canViewEInvoice,
   canViewUsers,
   isOpen,
+  isDesktopCollapsed,
   onClose,
 }: SidebarProps) {
   const [branding, setBranding] = useState<WebsiteBranding | null>(null);
@@ -223,7 +225,9 @@ export function Sidebar({
       <aside className={`fixed left-0 top-0 z-30 flex h-screen w-[220px] flex-col border-r border-gray-100 bg-white shadow-sm transition-transform duration-200 md:z-10 ${
         isOpen
           ? "translate-x-0 pointer-events-auto"
-          : "-translate-x-full pointer-events-none md:translate-x-0 md:pointer-events-auto"
+          : isDesktopCollapsed
+            ? "-translate-x-full pointer-events-none md:-translate-x-full md:pointer-events-none"
+            : "-translate-x-full pointer-events-none md:translate-x-0 md:pointer-events-auto"
       }`}>
       <div className="p-6">
         <h1 className="text-xl font-bold tracking-tight text-gray-900 cursor-pointer" onClick={() => setActiveView("Dashboard")}>

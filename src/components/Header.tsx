@@ -17,6 +17,7 @@ interface HeaderProps {
   onNotificationClick: (view: NotificationTargetView) => void;
   onSignOut: () => void;
   onMenuClick: () => void;
+  isSidebarCollapsed: boolean;
 }
 
 export function Header({
@@ -32,6 +33,7 @@ export function Header({
   onNotificationClick,
   onSignOut,
   onMenuClick,
+  isSidebarCollapsed,
 }: HeaderProps) {
   const { language, toggleLanguage } = useLanguage();
   const avatarImageUrl = avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas";
@@ -159,8 +161,8 @@ export function Header({
         <button
           type="button"
           onClick={onMenuClick}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-600 md:hidden"
-          aria-label="Open navigation menu"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-600"
+          aria-label={isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
         >
           <Menu className="h-5 w-5" />
         </button>
