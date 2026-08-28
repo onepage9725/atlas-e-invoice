@@ -894,10 +894,10 @@ export function ManageCases({ userId }: ManageCasesProps) {
                 <th className="px-6 py-2">Created By</th>
                 <th className="px-6 py-2">Booking Form</th>
                 <th className="px-6 py-2">Case Status</th>
+                <th className="px-6 py-2 text-right">Actions</th>
                 <th className="px-6 py-2">Delete Request</th>
                 <th className="px-6 py-2">Edited</th>
                 <th className="px-6 py-2">Reviewed</th>
-                <th className="px-6 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1003,40 +1003,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {record.delete_requested ? (
-                        <div>
-                          <div className="text-xs font-medium text-red-600">Requested</div>
-                          <div className="text-xs text-gray-500">{deleteRequester}</div>
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {editedAt ? (
-                        <div>
-                          <div className="text-xs font-medium text-gray-700">
-                            {editedAt.toLocaleDateString()}
-                          </div>
-                          <div className="text-xs text-gray-500">{editorLabel}</div>
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {reviewedAt ? (
-                        <div>
-                          <div className="text-xs font-medium text-gray-700">
-                            {reviewedAt.toLocaleDateString()}
-                          </div>
-                          <div className="text-xs text-gray-500">{reviewerLabel}</div>
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
                     <td className="px-6 py-3">
                       <div className="flex items-center justify-end gap-2">
                         {status === "Claimable" && !record.commission_review_sent_at && (
@@ -1079,12 +1045,46 @@ export function ManageCases({ userId }: ManageCasesProps) {
                         </button>
                       </div>
                     </td>
+                    <td className="px-6 py-3 text-gray-600">
+                      {record.delete_requested ? (
+                        <div>
+                          <div className="text-xs font-medium text-red-600">Requested</div>
+                          <div className="text-xs text-gray-500">{deleteRequester}</div>
+                        </div>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-6 py-3 text-gray-600">
+                      {editedAt ? (
+                        <div>
+                          <div className="text-xs font-medium text-gray-700">
+                            {editedAt.toLocaleDateString()}
+                          </div>
+                          <div className="text-xs text-gray-500">{editorLabel}</div>
+                        </div>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-6 py-3 text-gray-600">
+                      {reviewedAt ? (
+                        <div>
+                          <div className="text-xs font-medium text-gray-700">
+                            {reviewedAt.toLocaleDateString()}
+                          </div>
+                          <div className="text-xs text-gray-500">{reviewerLabel}</div>
+                        </div>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                   </tr>
                 );
               })}
               {filteredCases.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="py-6 text-center text-gray-500">
+                  <td colSpan={12} className="py-6 text-center text-gray-500">
                     No cases found.
                   </td>
                 </tr>
