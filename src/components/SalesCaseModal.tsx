@@ -822,14 +822,20 @@ export function SalesCaseModal({
   const selectedInvolvedProfile = formData.involvedUserId
     ? profilesById.get(formData.involvedUserId) ?? null
     : null;
+  const canSuperAdminSelectSelf = currentUserRole === "super_admin";
   const caseOwnerOptions = useMemo(
     () =>
       profiles.filter(
-        (profile) =>
-          profile.role !== "admin" &&
-          profile.role !== "super_admin"
+        (profile) => {
+          if (canSuperAdminSelectSelf && profile.id === userId) {
+            return true;
+          }
+
+          const normalizedRole = (profile.role ?? "").toLowerCase();
+          return normalizedRole !== "admin" && normalizedRole !== "super_admin";
+        }
       ),
-    [profiles]
+    [canSuperAdminSelectSelf, profiles, userId]
   );
   const involvedOptions = useMemo(
     () =>
