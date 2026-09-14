@@ -86,6 +86,9 @@ const getScopedSignedSpaStatus = (
   return optionSet.has(fallback) ? fallback : "None";
 };
 
+const normalizeAccessValue = (value: string | null | undefined) =>
+  value?.trim().toLowerCase().replace(/\s+/g, "_") ?? "";
+
 export const normalizeCaseStatus = (status: string | null | undefined): SalesCaseStatus => {
   const validStatuses = new Set<string>([
     ...CREATOR_CASE_STATUS_OPTIONS,
@@ -395,6 +398,7 @@ export type SalesCaseRecord = {
   lo_draft_url: string | null;
   signed_spa_url: string | null;
   signed_lo_date: string | null;
+  signed_spa_date: string | null;
   signed_spa_status: SignedSpaStatus | null;
   commission_structure: CommissionStructure | null;
   status: SalesCaseStatus | null;
@@ -600,6 +604,7 @@ const createEmptyForm = () => ({
   bookingReceiptName: "",
   status: "Pending" as SalesCaseStatus,
   signedSpaStatus: "None" as SignedSpaStatus,
+  signedSpaDate: "",
   signedSpaName: "",
   loDraftName: "",
   signedLoDate: "",
@@ -621,7 +626,7 @@ function toNumberOrNull(value: string) {
 }
 
 const shouldRetryWithoutExtendedContactColumns = (message: string) =>
-  /Could not find the 'customer_address' column|Could not find the 'customer_details' column|Could not find the 'customer_ic_url' column|Could not find the 'booking_receipt_url' column|Could not find the 'emergency_contact_|Could not find the 'signed_spa_url' column|Could not find the 'signed_lo_date' column|Could not find the 'signed_spa_status' column/i.test(message);
+  /Could not find the 'customer_address' column|Could not find the 'customer_details' column|Could not find the 'customer_ic_url' column|Could not find the 'booking_receipt_url' column|Could not find the 'emergency_contact_|Could not find the 'signed_spa_url' column|Could not find the 'signed_lo_date' column|Could not find the 'signed_spa_date' column|Could not find the 'signed_spa_status' column/i.test(message);
 
 const isRowLevelSecurityError = (message: string) =>
   /row-level security policy|violates row-level security|new row violates row-level security/i.test(message);
@@ -639,6 +644,7 @@ const stripExtendedContactColumns = <T extends Record<string, unknown>>(payload:
     emergency_contact_email,
     signed_spa_url,
     signed_lo_date,
+    signed_spa_date,
     signed_spa_status,
     ...legacyPayload
   } = payload;
@@ -654,6 +660,7 @@ const stripExtendedContactColumns = <T extends Record<string, unknown>>(payload:
   void emergency_contact_email;
   void signed_spa_url;
   void signed_lo_date;
+  void signed_spa_date;
   void signed_spa_status;
 
   return legacyPayload;
@@ -720,7 +727,7 @@ export function SalesCaseModal({
     return map;
   }, [profiles]);
 
-  const currentUserRole = (profilesById.get(userId)?.role ?? "").toLowerCase();
+  const currentUserRole = normalizeAccessValue(profilesById.get(userId)?.role);
   const isAdminRole = currentUserRole === "admin" || currentUserRole === "super_admin";
   const effectiveSignedSpaOptions = useMemo<readonly SignedSpaStatus[]>(() => {
     if (signedSpaOptions && signedSpaOptions.length > 0) {
@@ -776,6 +783,7 @@ export function SalesCaseModal({
       signedSpaStatus: isSignedSpaLocked
         ? "Complete"
         : getScopedSignedSpaStatus(initialCase.signed_spa_status, effectiveSignedSpaOptions, "None"),
+      signedSpaDate: initialCase.signed_spa_date ?? "",
       signedSpaName: initialCase.signed_spa_url
         ? initialCase.signed_spa_url.split("/").pop() ?? ""
         : "",
@@ -831,10 +839,15 @@ export function SalesCaseModal({
             return true;
           }
 
-          const normalizedRole = (profile.role ?? "").toLowerCase();
-          return normalizedRole !== "admin" && normalizedRole !== "super_admin";
+          const normalizedRole = normalizeAccessValue(profile.role);
+          return normalizedRole !== "admin";
         }
-      ),
+      )
+      .sort((left, right) => {
+        const leftLabel = (left.name || left.email || "Unnamed member").trim();
+        const rightLabel = (right.name || right.email || "Unnamed member").trim();
+        return leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+      }),
     [canSuperAdminSelectSelf, profiles, userId]
   );
   const involvedOptions = useMemo(
@@ -842,8 +855,13 @@ export function SalesCaseModal({
       profiles.filter(
         (profile) =>
           profile.id !== caseOwnerId &&
-          profile.role !== "admin"
-      ),
+          normalizeAccessValue(profile.role) !== "admin"
+      )
+      .sort((left, right) => {
+        const leftLabel = (left.name || left.email || "Unnamed member").trim();
+        const rightLabel = (right.name || right.email || "Unnamed member").trim();
+        return leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+      }),
     [caseOwnerId, profiles]
   );
 
@@ -1438,6 +1456,7 @@ export function SalesCaseModal({
         lo_draft_url?: string | null;
         signed_spa_url?: string | null;
         signed_lo_date?: string | null;
+        signed_spa_date?: string | null;
         signed_spa_status?: SignedSpaStatus;
         status?: SalesCaseStatus;
         created_by: string;
@@ -1480,6 +1499,7 @@ export function SalesCaseModal({
         payload.lo_draft_url = loDraftUrl;
         payload.signed_spa_url = signedSpaUrl;
         payload.signed_lo_date = signedLoDate || null;
+        payload.signed_spa_date = formData.signedSpaDate.trim() || null;
         payload.status = nextStatus;
         payload.signed_spa_status = nextSignedSpaStatus;
       }
@@ -1851,6 +1871,17 @@ export function SalesCaseModal({
                     onChange={(status) => setFormData((prev) => ({ ...prev, signedSpaStatus: status }))}
                     disabled={isSignedSpaLocked || isReadOnly}
                   />
+                  <div className="mt-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Signed SPA Date</label>
+                    <input
+                      type="date"
+                      name="signedSpaDate"
+                      value={formData.signedSpaDate}
+                      onChange={handleChange}
+                      disabled={isSignedSpaLocked || isReadOnly}
+                      className="w-full rounded-lg border border-gray-200 p-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none bg-white disabled:cursor-not-allowed disabled:bg-gray-100"
+                    />
+                  </div>
                   <p className="mt-2 text-xs text-gray-600">
                     Signed SPA attachment is optional and can be submitted later.
                   </p>

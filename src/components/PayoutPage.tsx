@@ -245,12 +245,16 @@ const getCompanyRowKey = (
 
 export function PayoutPage({
   userId,
+  role,
   onNavigateToPaymentVoucher,
 }: {
   userId: string;
+  role: string | null;
   onNavigateToPaymentVoucher?: () => void;
 }) {
   void onNavigateToPaymentVoucher;
+  const isSuperAdmin = role === "super_admin";
+  const canViewCompanyRows = isSuperAdmin;
 
   const [payouts, setPayouts] = useState<SalesCasePayoutRecord[]>([]);
   const [companyReceipts, setCompanyReceipts] = useState<FinanceEntryRecord[]>([]);
@@ -568,7 +572,11 @@ export function PayoutPage({
       }];
     });
 
-    return [...memberRows, ...standardCompanyRows, ...topUpCompanyRows].sort((left, right) => {
+    const scopedRows = canViewCompanyRows
+      ? [...memberRows, ...standardCompanyRows, ...topUpCompanyRows]
+      : memberRows;
+
+    return scopedRows.sort((left, right) => {
       const leftCreatedAt = left.record?.created_at ? new Date(left.record.created_at).getTime() : 0;
       const rightCreatedAt = right.record?.created_at ? new Date(right.record.created_at).getTime() : 0;
       if (rightCreatedAt !== leftCreatedAt) {
@@ -581,7 +589,7 @@ export function PayoutPage({
 
       return left.rowType === "company" ? 1 : -1;
     });
-  }, [caseMap, companyReceiptSummary, payouts, profileMap, projectMap]);
+  }, [canViewCompanyRows, caseMap, companyReceiptSummary, payouts, profileMap, projectMap]);
 
   const pendingDeleteCompanyRow = useMemo(
     () =>
@@ -1496,17 +1504,21 @@ export function PayoutPage({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-2 xl:grid-cols-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-sm font-medium text-gray-500 mb-2">Company Pending Case</p>
-          <p className="text-2xl font-bold text-gray-900">{companyPendingCaseCount}</p>
-          <p className="text-xs text-gray-500 mt-2">Cases waiting for developer payment.</p>
-        </div>
-        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-sm font-medium text-gray-500 mb-2">Company Pending Comm</p>
-          <p className="text-2xl font-bold text-gray-900">RM {formatAmount(companyPendingComm)}</p>
-          <p className="text-xs text-gray-500 mt-2">Company commission pending from developers.</p>
-        </div>
+      <div className={`grid grid-cols-1 gap-4 mb-6 ${canViewCompanyRows ? "md:grid-cols-2 xl:grid-cols-4" : "md:grid-cols-2"}`}>
+        {canViewCompanyRows && (
+          <>
+            <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+              <p className="text-sm font-medium text-gray-500 mb-2">Company Pending Case</p>
+              <p className="text-2xl font-bold text-gray-900">{companyPendingCaseCount}</p>
+              <p className="text-xs text-gray-500 mt-2">Cases waiting for developer payment.</p>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+              <p className="text-sm font-medium text-gray-500 mb-2">Company Pending Comm</p>
+              <p className="text-2xl font-bold text-gray-900">RM {formatAmount(companyPendingComm)}</p>
+              <p className="text-xs text-gray-500 mt-2">Company commission pending from developers.</p>
+            </div>
+          </>
+        )}
         <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
           <p className="text-sm font-medium text-gray-500 mb-2">Agent Pending Case</p>
           <p className="text-2xl font-bold text-gray-900">{agentPendingCaseCount}</p>

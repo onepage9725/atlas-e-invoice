@@ -65,6 +65,7 @@ type ComponentPaymentMeta = {
   payoutId: string;
   amount: number;
   remark: string;
+  releasePercentage?: number;
 };
 
 type VoucherHistoryMeta = {
@@ -108,10 +109,9 @@ const HISTORY_META_SEPARATOR = "|||META|||";
 
 const formatAmount = (value: number) => {
   const roundedValue = Number(value.toFixed(2));
-  const hasDecimals = Math.round(roundedValue) !== roundedValue;
 
   return roundedValue.toLocaleString("en-MY", {
-    minimumFractionDigits: hasDecimals ? 2 : 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 };
@@ -1605,12 +1605,22 @@ export function PaymentVoucherPage({
     const selectedComponentPayments = selectedComponentRows.map((item) => {
       const typedAmount = Number(batchAmountsByComponentKey[item.componentKey]);
       const amount = Number.isFinite(typedAmount) ? Number(typedAmount.toFixed(2)) : NaN;
+      const typedReleasePercentage = Number(batchReleasePercentByComponentKey[item.componentKey]);
+      const maxReleasePercentage = getRemainingPercentage(item.component, item.remainingAmount);
+      const derivedReleasePercentage =
+        Number.isFinite(amount) && item.component.amount > 0 && item.component.percentage > 0
+          ? Number(((amount / item.component.amount) * item.component.percentage).toFixed(3))
+          : NaN;
+      const releasePercentage = Number.isFinite(typedReleasePercentage)
+        ? Number(Math.min(Math.max(typedReleasePercentage, 0), maxReleasePercentage).toFixed(3))
+        : derivedReleasePercentage;
       const remark = (batchRemarksByComponentKey[item.componentKey] ?? "").trim();
 
       return {
         componentKey: item.componentKey,
         payoutId: item.row.id,
         amount,
+        releasePercentage,
         remark,
         remainingAmount: item.remainingAmount,
       };
@@ -1636,11 +1646,15 @@ export function PaymentVoucherPage({
 
     const payableRows = selectedComponentRows.map(({ componentKey, row, component }) => {
       const matchedPayment = selectedComponentPayments.find((item) => item.componentKey === componentKey);
+      const releasePercentage =
+        matchedPayment && Number.isFinite(matchedPayment.releasePercentage)
+          ? matchedPayment.releasePercentage
+          : component.percentage;
 
       return {
         ...row,
         id: componentKey,
-        commissionPercentage: component.percentage,
+        commissionPercentage: releasePercentage,
         amount: matchedPayment ? matchedPayment.amount : component.amount,
         componentCategory: component.componentCategory,
       };
@@ -1728,6 +1742,7 @@ export function PaymentVoucherPage({
           componentKey: item.componentKey,
           payoutId: item.payoutId,
           amount: item.amount,
+          releasePercentage: Number.isFinite(item.releasePercentage) ? item.releasePercentage : null,
           remark: item.remark,
         })),
       } as VoucherHistoryMeta);
@@ -2058,7 +2073,7 @@ export function PaymentVoucherPage({
           <p className="mt-1 text-sm text-gray-500">
             {canGenerateVoucher
               ? "Above shows cases that have not made payment yet. Tick one or more agent rows and generate payment voucher PDF."
-              : "View only mode. Admin can only view generated payment voucher history."}
+              : "View only mode. You can only view generated payment voucher history."}
           </p>
         </div>
         {canGenerateVoucher && (

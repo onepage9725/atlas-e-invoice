@@ -146,6 +146,9 @@ const getCaseDateForMonthFilter = (record: SalesCaseRecord) => {
   return parseFilterDateValue(record.booking_date ?? record.created_at);
 };
 
+const normalizeAccessValue = (value: string | null | undefined) =>
+  value?.trim().toLowerCase().replace(/\s+/g, "_") ?? "";
+
 const normalizeRankCategory = (
   profile: Pick<RankingProfile, "role" | "rank"> | null | undefined
 ): RankCategory => {
@@ -153,11 +156,14 @@ const normalizeRankCategory = (
     return "agent";
   }
 
-  if (profile.role === "leader" || profile.rank === "leader") {
+  const normalizedRole = normalizeAccessValue(profile.role);
+  const normalizedRank = normalizeAccessValue(profile.rank);
+
+  if (normalizedRole === "leader" || normalizedRank === "leader") {
     return "leader";
   }
 
-  if (profile.rank === "pre_leader") {
+  if (normalizedRank === "pre_leader") {
     return "pre_leader";
   }
 
@@ -168,18 +174,24 @@ const formatRankLabel = (value: RankCategory) => value.replace("_", " ");
 
 const DEFAULT_AVATAR_URL = "https://api.dicebear.com/7.x/avataaars/svg?seed=Atlas";
 
-const isMemberProfile = (profile: RankingProfile) =>
-  profile.role !== "admin" &&
-  profile.role !== "super_admin" &&
-  (profile.role === "agent" ||
-    profile.role === "leader" ||
-    ["agent", "pre_leader", "leader"].includes(profile.rank ?? ""));
+const isMemberProfile = (profile: RankingProfile) => {
+  const normalizedRole = normalizeAccessValue(profile.role);
+  const normalizedRank = normalizeAccessValue(profile.rank);
+
+  return (
+    normalizedRole !== "admin" &&
+    normalizedRole !== "super_admin" &&
+    (normalizedRole === "agent" ||
+      normalizedRole === "leader" ||
+      ["agent", "pre_leader", "leader"].includes(normalizedRank))
+  );
+};
 
 const isLeaderProfile = (profile: Pick<RankingProfile, "role" | "rank"> | null | undefined) =>
-  Boolean(profile && (profile.role === "leader" || profile.rank === "leader"));
+  Boolean(profile && (normalizeAccessValue(profile.role) === "leader" || normalizeAccessValue(profile.rank) === "leader"));
 
 const isPreLeaderProfile = (profile: Pick<RankingProfile, "rank"> | null | undefined) =>
-  Boolean(profile && profile.rank === "pre_leader");
+  Boolean(profile && normalizeAccessValue(profile.rank) === "pre_leader");
 
 const getLeaderChain = (
   profile: RankingProfile | null,
@@ -197,7 +209,7 @@ const getLeaderChain = (
   const nextVisitedIds = new Set(visitedIds);
   nextVisitedIds.add(profile.id);
 
-  if (profile.rank === "leader") {
+  if (normalizeAccessValue(profile.rank) === "leader") {
     return { preLeader: null, leader: profile };
   }
 
@@ -207,16 +219,16 @@ const getLeaderChain = (
     return { preLeader: null, leader: null };
   }
 
-  if (recruiter.rank === "leader") {
+  if (normalizeAccessValue(recruiter.rank) === "leader") {
     return { preLeader: null, leader: recruiter };
   }
 
-  if (recruiter.rank === "pre_leader") {
+  if (normalizeAccessValue(recruiter.rank) === "pre_leader") {
     const leader = recruiter.recruit_by ? profileMap.get(recruiter.recruit_by) ?? null : null;
     return { preLeader: recruiter, leader };
   }
 
-  if (recruiter.rank === "agent") {
+  if (normalizeAccessValue(recruiter.rank) === "agent") {
     return getLeaderChain(recruiter, profileMap, nextVisitedIds);
   }
 

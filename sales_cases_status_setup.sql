@@ -16,6 +16,7 @@ alter table public.sales_cases
   add column if not exists lo_draft_url text,
   add column if not exists signed_spa_url text,
   add column if not exists signed_lo_date date,
+  add column if not exists signed_spa_date date,
   add column if not exists commission_structure jsonb,
   add column if not exists commission_review_sent_at timestamptz,
   add column if not exists commission_review_sent_by uuid;
@@ -162,7 +163,7 @@ with check (
     select 1
     from public.profiles as case_owner
     where case_owner.id = created_by
-      and case_owner.role not in ('admin', 'super_admin')
+      and case_owner.role <> 'admin'
   )
   and status = 'Pending'
 );
@@ -266,7 +267,7 @@ using (
     select 1
     from public.profiles
     where profiles.id = auth.uid()
-      and profiles.role = 'super_admin'
+      and profiles.role in ('admin', 'super_admin')
   )
 )
 with check (
@@ -274,7 +275,7 @@ with check (
     select 1
     from public.profiles
     where profiles.id = auth.uid()
-      and profiles.role = 'super_admin'
+      and profiles.role in ('admin', 'super_admin')
   )
 );
 
@@ -288,7 +289,7 @@ using (
     select 1
     from public.profiles
     where profiles.id = auth.uid()
-      and profiles.role = 'super_admin'
+      and profiles.role in ('admin', 'super_admin')
   )
 );
 
@@ -808,6 +809,7 @@ returns table (
   lo_draft_url text,
   signed_spa_url text,
   signed_lo_date date,
+  signed_spa_date date,
   signed_spa_status text,
   commission_structure jsonb,
   status text,
@@ -856,6 +858,7 @@ as $$
     sales_cases.lo_draft_url,
     sales_cases.signed_spa_url,
     sales_cases.signed_lo_date,
+    sales_cases.signed_spa_date,
     sales_cases.signed_spa_status,
     sales_cases.commission_structure,
     sales_cases.status,

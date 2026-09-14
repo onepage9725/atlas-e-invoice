@@ -64,6 +64,17 @@ const isFirstLoginPasswordChangeRequired = (metadata: unknown) => {
   return PASSWORD_CHANGE_METADATA_KEYS.some((key) => metadataRecord[key] === true);
 };
 
+type ProfileAccessRow = {
+  role: string | null;
+  rank: string | null;
+  name: string | null;
+  is_active: boolean | null;
+  avatar_url: string | null;
+  avatar_position_x: number | null;
+  avatar_position_y: number | null;
+  avatar_zoom: number | null;
+};
+
 function App() {
   const [activeView, setActiveView] = useState("Dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -131,6 +142,16 @@ function App() {
     setFirstLoginPasswordError(null);
     setIsFirstLoginPasswordSubmitting(false);
     setActiveView("Dashboard");
+  };
+
+  const clearProfileState = () => {
+    setProfileRole(null);
+    setProfileRank(null);
+    setProfileName(null);
+    setProfileAvatarUrl(null);
+    setProfileAvatarX(null);
+    setProfileAvatarY(null);
+    setProfileAvatarZoom(null);
   };
 
   useEffect(() => {
@@ -205,7 +226,7 @@ function App() {
     const loadProfile = async () => {
       if (!sessionUserId) {
         setIsProfileLoading(false);
-        clearSessionState();
+        clearProfileState();
         return;
       }
 
@@ -222,13 +243,7 @@ function App() {
           await supabase.auth.signOut({ scope: "local" });
           clearSessionState();
         } else {
-          setProfileRole(null);
-          setProfileRank(null);
-          setProfileName(null);
-          setProfileAvatarUrl(null);
-          setProfileAvatarX(null);
-          setProfileAvatarY(null);
-          setProfileAvatarZoom(null);
+          clearProfileState();
         }
         setIsProfileLoading(false);
         return;
@@ -250,17 +265,49 @@ function App() {
         return;
       }
 
-      setProfileRole(data?.role ?? null);
-      setProfileRank(data?.rank ?? null);
-      setProfileName(data?.name ?? null);
-      setProfileAvatarUrl(data?.avatar_url ?? null);
-      setProfileAvatarX(data?.avatar_position_x ?? null);
-      setProfileAvatarY(data?.avatar_position_y ?? null);
-      setProfileAvatarZoom(data?.avatar_zoom ?? null);
+      const profileData = (data as ProfileAccessRow | null) ?? null;
+      setProfileRole(profileData?.role ?? null);
+      setProfileRank(profileData?.rank ?? null);
+      setProfileName(profileData?.name ?? null);
+      setProfileAvatarUrl(profileData?.avatar_url ?? null);
+      setProfileAvatarX(profileData?.avatar_position_x ?? null);
+      setProfileAvatarY(profileData?.avatar_position_y ?? null);
+      setProfileAvatarZoom(profileData?.avatar_zoom ?? null);
       setIsProfileLoading(false);
     };
 
-    loadProfile();
+    void loadProfile();
+
+    if (!sessionUserId) {
+      return;
+    }
+
+    const profileChannel = supabase
+      .channel(`profile-sync-${sessionUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${sessionUserId}`,
+        },
+        () => {
+          void loadProfile();
+        }
+      )
+      .subscribe();
+
+    const handleWindowFocus = () => {
+      void loadProfile();
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+      void supabase.removeChannel(profileChannel);
+    };
   }, [sessionUserId]);
 
   const handleSignOut = async () => {
@@ -361,8 +408,8 @@ function App() {
     normalizedProfileRank === "leader";
   const canManageEvents = normalizedProfileRole === "super_admin" || normalizedProfileRole === "admin";
   const canViewManageCases = isSuperAdmin || isAdmin;
-  const canViewCommReview = isSuperAdmin;
-  const canViewPayout = isSuperAdmin;
+  const canViewCommReview = isSuperAdmin || isAdmin;
+  const canViewPayout = isSuperAdmin || isAdmin;
   const canViewPaymentVoucher = isSuperAdmin || isAdmin;
   const canViewFinance = isSuperAdmin;
   const canViewEInvoice = isSuperAdmin;
@@ -492,7 +539,7 @@ function App() {
           ))}
         {activeView === "Team" &&
           (canViewTeam && sessionUserId ? (
-            <TeamPage userId={sessionUserId} role={profileRole} rank={profileRank} />
+            <TeamPage userId={sessionUserId} role={normalizedProfileRole} rank={normalizedProfileRank} />
           ) : (
             <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
@@ -512,7 +559,7 @@ function App() {
           ))}
         {activeView === "Rank Progress" &&
           (canViewRankProgress ? (
-            <RankProgressPage role={profileRole} userId={sessionUserId} />
+            <RankProgressPage role={normalizedProfileRole} userId={sessionUserId} />
           ) : (
             <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
@@ -559,7 +606,11 @@ function App() {
         {activeView === "Payout" &&
           (canViewPayout ? (
             sessionUserId ? (
-              <PayoutPage userId={sessionUserId} onNavigateToPaymentVoucher={() => handleSetActiveView("Payment Voucher")} />
+              <PayoutPage
+                userId={sessionUserId}
+                role={normalizedProfileRole}
+                onNavigateToPaymentVoucher={() => handleSetActiveView("Payment Voucher")}
+              />
             ) : (
               <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
@@ -577,7 +628,7 @@ function App() {
         {activeView === "Payment Voucher" &&
           (canViewPaymentVoucher ? (
             sessionUserId ? (
-              <PaymentVoucherPage userId={sessionUserId} canGenerateVoucher={isSuperAdmin} />
+              <PaymentVoucherPage userId={sessionUserId} canGenerateVoucher={canViewPaymentVoucher} />
             ) : (
               <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
@@ -617,7 +668,7 @@ function App() {
         {activeView === "Finance" &&
           (canViewFinance ? (
             sessionUserId ? (
-              <FinancePage userId={sessionUserId} role={profileRole} />
+              <FinancePage userId={sessionUserId} role={normalizedProfileRole} />
             ) : (
               <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
@@ -653,7 +704,7 @@ function App() {
         {activeView === "Profile" && sessionUserId && (
           <ProfilePage
             userId={sessionUserId}
-            role={profileRole}
+            role={normalizedProfileRole}
             onProfileUpdated={handleProfileUpdated}
           />
         )}
