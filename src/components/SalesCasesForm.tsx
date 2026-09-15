@@ -1211,11 +1211,9 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                 <th className="px-6 py-2">Created Date</th>
                 <th className="px-6 py-2">Booking Date</th>
                 <th className="px-6 py-2">Project</th>
-                <th className="px-6 py-2">Unit</th>
                 <th className="px-6 py-2">SPA Price (RM)</th>
                 <th className="px-6 py-2">Nett Price (RM)</th>
                 <th className="px-6 py-2">Created By</th>
-                <th className="px-6 py-2">Booking Form</th>
                 <th className="px-6 py-2">Status</th>
                 <th className="px-6 py-2">Commission</th>
                 <th className="px-6 py-2 text-right">Actions</th>
@@ -1275,26 +1273,12 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
                     </td>
                     <td className="px-6 py-3 text-gray-600">
                       <div>{projectName}</div>
+                      <div className="text-xs text-gray-500">Unit {record.unit_number || "-"}</div>
                       {topUpLabel && <div className="text-xs text-amber-700">{topUpLabel}</div>}
                     </td>
-                    <td className="px-6 py-3 text-gray-600">{record.unit_number || "-"}</td>
                     <td className="px-6 py-3 text-gray-600">{formatAmount(record.spa_price)}</td>
                     <td className="px-6 py-3 text-gray-600">{formatAmount(record.nett_price)}</td>
                     <td className="px-6 py-3 text-gray-600">{creatorLabel}</td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {record.booking_form_url ? (
-                        <a
-                          href={record.booking_form_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-primary hover:underline"
-                        >
-                          View PDF
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
                     <td className="px-6 py-3 text-gray-600">
                       <span
                         className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getCaseStatusClasses(displayStatus)}`}

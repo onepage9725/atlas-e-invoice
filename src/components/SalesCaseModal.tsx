@@ -611,13 +611,13 @@ const createEmptyForm = () => ({
 });
 
 const formatNumberInput = (value: number | null) => (value === null ? "" : value.toString());
-const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+const MAX_UPLOAD_SIZE_BYTES = 80 * 1024 * 1024;
 
 const isFileTooLarge = (file: File | null | undefined) =>
   Boolean(file && file.size > MAX_UPLOAD_SIZE_BYTES);
 
 const getFileSizeError = (label: string) =>
-  `${label} exceeds the 100MB file size limit. Please upload a file smaller than 100MB.`;
+  `${label} exceeds the 80MB file size limit. Please upload a file smaller than 80MB.`;
 
 function toNumberOrNull(value: string) {
   if (value === "") return null;

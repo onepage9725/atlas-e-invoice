@@ -80,9 +80,9 @@ alter table public.sales_case_payouts
   add constraint sales_case_payouts_type_check
   check (payout_type in ('standard', 'tier_upgrade_top_up'));
 
--- Allow uploads up to 100MB in the shared cases bucket.
+-- Allow uploads up to 80MB in the shared cases bucket.
 update storage.buckets
-set file_size_limit = 104857600
+set file_size_limit = 83886080
 where id = 'cases';
 
 create unique index if not exists sales_case_payouts_standard_unique_idx
