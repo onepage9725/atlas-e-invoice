@@ -692,6 +692,8 @@ export function SalesCaseModal({
   const [loDraftFile, setLoDraftFile] = useState<File | null>(null);
   const [signedSpaFile, setSignedSpaFile] = useState<File | null>(null);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
+  const loDraftInputRef = useRef<HTMLInputElement | null>(null);
+  const signedSpaInputRef = useRef<HTMLInputElement | null>(null);
 
   const isEditing = Boolean(initialCase);
   const isReadOnly = readOnly && isEditing;
@@ -782,7 +784,7 @@ export function SalesCaseModal({
       status: normalizeCaseStatus(initialCase.status),
       signedSpaStatus: isSignedSpaLocked
         ? "Complete"
-        : getScopedSignedSpaStatus(initialCase.signed_spa_status, effectiveSignedSpaOptions, "None"),
+        : normalizeSignedSpaStatus(initialCase.signed_spa_status, "None"),
       signedSpaDate: initialCase.signed_spa_date ?? "",
       signedSpaName: initialCase.signed_spa_url
         ? initialCase.signed_spa_url.split("/").pop() ?? ""
@@ -797,7 +799,24 @@ export function SalesCaseModal({
     setBookingReceiptFile(null);
     setLoDraftFile(null);
     setSignedSpaFile(null);
-  }, [effectiveSignedSpaOptions, initialCase, isSignedSpaLocked]);
+  }, [initialCase, isSignedSpaLocked]);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const nextSignedSpaStatus = isSignedSpaLocked
+        ? "Complete"
+        : getScopedSignedSpaStatus(prev.signedSpaStatus, effectiveSignedSpaOptions, "None");
+
+      if (nextSignedSpaStatus === prev.signedSpaStatus) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        signedSpaStatus: nextSignedSpaStatus,
+      };
+    });
+  }, [effectiveSignedSpaOptions, isSignedSpaLocked]);
 
   useEffect(() => {
     setCustomerIcFiles((prev) => {
@@ -1083,6 +1102,9 @@ export function SalesCaseModal({
   };
 
   const handleLoDraftChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
     const file = e.target.files?.[0] ?? null;
 
     if (isFileTooLarge(file)) {
@@ -1093,9 +1115,13 @@ export function SalesCaseModal({
     setError(null);
     setLoDraftFile(file);
     setFormData((prev) => ({ ...prev, loDraftName: file ? file.name : prev.loDraftName }));
+    e.currentTarget.value = "";
   };
 
   const handleSignedSpaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
     const file = e.target.files?.[0] ?? null;
 
     if (isFileTooLarge(file)) {
@@ -1106,6 +1132,7 @@ export function SalesCaseModal({
     setError(null);
     setSignedSpaFile(file);
     setFormData((prev) => ({ ...prev, signedSpaName: file ? file.name : prev.signedSpaName }));
+    e.currentTarget.value = "";
   };
 
   const handleCustomerIcChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1804,16 +1831,21 @@ export function SalesCaseModal({
                     <label className="block text-sm font-medium text-gray-700 mb-1">LO Draft (PDF)</label>
                     {allowLoDraftUpload ? (
                       <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                        <button
+                          type="button"
+                          onClick={() => loDraftInputRef.current?.click()}
+                          className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50"
+                        >
                           <Upload className="w-4 h-4 text-gray-500" />
                           Upload LO Draft
-                          <input
-                            type="file"
-                            accept="application/pdf"
-                            onChange={handleLoDraftChange}
-                            className="hidden"
-                          />
-                        </label>
+                        </button>
+                        <input
+                          ref={loDraftInputRef}
+                          type="file"
+                          accept="application/pdf"
+                          onChange={handleLoDraftChange}
+                          className="hidden"
+                        />
                         <span className="text-xs text-gray-500">
                           {loDraftFile?.name || formData.loDraftName || "No file selected"}
                         </span>
@@ -1897,16 +1929,21 @@ export function SalesCaseModal({
                     <label className="block text-sm font-medium text-gray-700 mb-1">Signed SPA Attachment (PDF)</label>
                     {allowLoDraftUpload ? (
                       <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-white/70 bg-white/50">
+                        <button
+                          type="button"
+                          onClick={() => signedSpaInputRef.current?.click()}
+                          className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-white/70 bg-white/50"
+                        >
                           <Upload className="w-4 h-4 text-gray-500" />
                           Upload Signed SPA
-                          <input
-                            type="file"
-                            accept="application/pdf"
-                            onChange={handleSignedSpaChange}
-                            className="hidden"
-                          />
-                        </label>
+                        </button>
+                        <input
+                          ref={signedSpaInputRef}
+                          type="file"
+                          accept="application/pdf"
+                          onChange={handleSignedSpaChange}
+                          className="hidden"
+                        />
                         <span className="text-xs text-gray-600">
                           {signedSpaFile?.name || formData.signedSpaName || "No file selected"}
                         </span>
