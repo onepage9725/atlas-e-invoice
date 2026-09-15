@@ -223,14 +223,18 @@ function App() {
       return;
     }
 
-    const loadProfile = async () => {
+    const loadProfile = async ({ silent = false }: { silent?: boolean } = {}) => {
       if (!sessionUserId) {
-        setIsProfileLoading(false);
+        if (!silent) {
+          setIsProfileLoading(false);
+        }
         clearProfileState();
         return;
       }
 
-      setIsProfileLoading(true);
+      if (!silent) {
+        setIsProfileLoading(true);
+      }
 
       const { data, error } = await supabase
         .from("profiles")
@@ -245,7 +249,9 @@ function App() {
         } else {
           clearProfileState();
         }
-        setIsProfileLoading(false);
+        if (!silent) {
+          setIsProfileLoading(false);
+        }
         return;
       }
 
@@ -260,7 +266,9 @@ function App() {
         setProfileAvatarY(null);
         setProfileAvatarZoom(null);
         setActiveView("Dashboard");
-        setIsProfileLoading(false);
+        if (!silent) {
+          setIsProfileLoading(false);
+        }
         await supabase.auth.signOut({ scope: "local" });
         return;
       }
@@ -273,7 +281,9 @@ function App() {
       setProfileAvatarX(profileData?.avatar_position_x ?? null);
       setProfileAvatarY(profileData?.avatar_position_y ?? null);
       setProfileAvatarZoom(profileData?.avatar_zoom ?? null);
-      setIsProfileLoading(false);
+      if (!silent) {
+        setIsProfileLoading(false);
+      }
     };
 
     void loadProfile();
@@ -293,13 +303,13 @@ function App() {
           filter: `id=eq.${sessionUserId}`,
         },
         () => {
-          void loadProfile();
+          void loadProfile({ silent: true });
         }
       )
       .subscribe();
 
     const handleWindowFocus = () => {
-      void loadProfile();
+      void loadProfile({ silent: true });
     };
 
     window.addEventListener("focus", handleWindowFocus);
