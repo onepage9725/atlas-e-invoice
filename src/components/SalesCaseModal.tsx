@@ -1229,25 +1229,33 @@ export function SalesCaseModal({
   const uploadCustomerIcs = async () => {
     const nextUrls = [...formData.customers.map((customer) => customer.icUrl || "")];
 
-    for (let index = 0; index < customerIcFiles.length; index += 1) {
-      const customerIcFile = customerIcFiles[index];
+    const uploadResults = await Promise.all(
+      customerIcFiles.map(async (customerIcFile, index) => {
+        if (!customerIcFile) {
+          return null;
+        }
 
-      if (!customerIcFile) {
-        continue;
+        const filePath = `${userId}/${Date.now()}-${index}-${sanitizeFileName(customerIcFile.name)}`;
+        const { error: uploadError } = await supabase.storage
+          .from("cases")
+          .upload(filePath, customerIcFile, { upsert: true });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
+        return { index, publicUrl: data.publicUrl };
+      })
+    );
+
+    uploadResults.forEach((result) => {
+      if (!result) {
+        return;
       }
 
-      const filePath = `${userId}/${Date.now()}-${index}-${sanitizeFileName(customerIcFile.name)}`;
-      const { error: uploadError } = await supabase.storage
-        .from("cases")
-        .upload(filePath, customerIcFile, { upsert: true });
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
-      nextUrls[index] = data.publicUrl;
-    }
+      nextUrls[result.index] = result.publicUrl;
+    });
 
     return nextUrls;
   };
@@ -1265,6 +1273,23 @@ export function SalesCaseModal({
 
     const { data } = supabase.storage.from("cases").getPublicUrl(filePath);
     return data.publicUrl;
+  };
+
+  const uploadWithRlsGuard = async <T,>(
+    uploader: () => Promise<T>,
+    rlsErrorMessage: string
+  ) => {
+    try {
+      return await uploader();
+    } catch (uploadError) {
+      const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
+
+      if (isRowLevelSecurityError(uploadMessage)) {
+        throw new Error(rlsErrorMessage);
+      }
+
+      throw uploadError instanceof Error ? uploadError : new Error("Upload failed.");
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1338,73 +1363,33 @@ export function SalesCaseModal({
       let signedSpaUrl: string | null = initialCase?.signed_spa_url ?? null;
 
       try {
-        bookingFormUrl = await uploadBookingForm();
+        [bookingFormUrl, loDraftUrl, signedSpaUrl, customerIcUrls, bookingReceiptUrl] = await Promise.all([
+          uploadWithRlsGuard(
+            uploadBookingForm,
+            "Booking form upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'."
+          ),
+          uploadWithRlsGuard(
+            uploadLoDraft,
+            "LO Draft upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'."
+          ),
+          uploadWithRlsGuard(
+            uploadSignedSpa,
+            "Signed SPA upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'."
+          ),
+          uploadWithRlsGuard(
+            uploadCustomerIcs,
+            "Customer I/C upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'."
+          ),
+          uploadWithRlsGuard(
+            uploadBookingReceipt,
+            "Booking receipt upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'."
+          ),
+        ]);
       } catch (uploadError) {
-        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
-
-        if (isRowLevelSecurityError(uploadMessage)) {
-          setError("Booking form upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        throw uploadError;
-      }
-
-      try {
-        loDraftUrl = await uploadLoDraft();
-      } catch (uploadError) {
-        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
-
-        if (isRowLevelSecurityError(uploadMessage)) {
-          setError("LO Draft upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        throw uploadError;
-      }
-
-      try {
-        signedSpaUrl = await uploadSignedSpa();
-      } catch (uploadError) {
-        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
-
-        if (isRowLevelSecurityError(uploadMessage)) {
-          setError("Signed SPA upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        throw uploadError;
-      }
-
-      try {
-        customerIcUrls = await uploadCustomerIcs();
-      } catch (uploadError) {
-        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
-
-        if (isRowLevelSecurityError(uploadMessage)) {
-          setError("Customer I/C upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        throw uploadError;
-      }
-
-      try {
-        bookingReceiptUrl = await uploadBookingReceipt();
-      } catch (uploadError) {
-        const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError ?? "");
-
-        if (isRowLevelSecurityError(uploadMessage)) {
-          setError("Booking receipt upload is blocked by Supabase storage policy. Please update storage.objects policy for bucket 'cases'.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        throw uploadError;
+        const uploadMessage = uploadError instanceof Error ? uploadError.message : "Upload failed.";
+        setError(uploadMessage || "Upload failed.");
+        setIsSubmitting(false);
+        return;
       }
 
       const nextStatus = enableWorkflowFields && isEditing ? formData.status : "Pending";
@@ -1557,55 +1542,55 @@ export function SalesCaseModal({
           return;
         }
 
-        if (bookingFormFile && initialCase.booking_form_url) {
-          await deleteBookingFormFromStorage(initialCase.booking_form_url);
-        }
+        const staleAttachmentUrls = [
+          bookingFormFile ? initialCase.booking_form_url : null,
+          customerIcFiles.some(Boolean) ? initialCase.customer_ic_url : null,
+          bookingReceiptFile ? initialCase.booking_receipt_url : null,
+          enableWorkflowFields && loDraftFile ? initialCase.lo_draft_url : null,
+          enableWorkflowFields && signedSpaFile ? initialCase.signed_spa_url : null,
+        ].filter(Boolean) as string[];
 
-        if (customerIcFiles[0] && initialCase.customer_ic_url) {
-          await deleteBookingFormFromStorage(initialCase.customer_ic_url);
-        }
+        void (async () => {
+          try {
+            await Promise.all(
+              staleAttachmentUrls.map((url) => deleteBookingFormFromStorage(url))
+            );
+          } catch (cleanupError) {
+            console.error("Failed to clean up replaced sales case attachments", cleanupError);
+          }
+        })();
 
-        if (bookingReceiptFile && initialCase.booking_receipt_url) {
-          await deleteBookingFormFromStorage(initialCase.booking_receipt_url);
-        }
+        void (async () => {
+          try {
+            const actorLabel = getNotificationProfileLabel(userId, profiles);
+            const isCancelling = nextStatus === "Cancel" && previousStatus !== "Cancel";
+            const hasNewLoDraft = enableWorkflowFields && Boolean(loDraftFile);
+            const amountLabel = formatCommissionAmount(toNumberOrNull(formData.spaPrice) ?? 0);
+            const title = isCancelling
+              ? "Sales case cancelled"
+              : hasNewLoDraft
+                ? "Signed LO draft uploaded"
+                : "Sales case updated";
+            const message = isCancelling
+              ? `${actorLabel} cancelled the sales case for ${selectedProject?.project_name || "Unnamed project"}, ${formData.unitNumber ? `Unit ${formData.unitNumber}` : "Unit -"}, SPA ${amountLabel}.`
+              : hasNewLoDraft
+                ? `${actorLabel} uploaded a signed LO draft for ${selectedProject?.project_name || "Unnamed project"}, ${formData.unitNumber ? `Unit ${formData.unitNumber}` : "Unit -"}, SPA ${amountLabel}.`
+                : `${actorLabel} updated the sales case for ${selectedProject?.project_name || "Unnamed project"}, ${formData.unitNumber ? `Unit ${formData.unitNumber}` : "Unit -"}, SPA ${amountLabel}.`;
 
-        if (enableWorkflowFields && loDraftFile && initialCase.lo_draft_url) {
-          await deleteBookingFormFromStorage(initialCase.lo_draft_url);
-        }
-
-        if (enableWorkflowFields && signedSpaFile && initialCase.signed_spa_url) {
-          await deleteBookingFormFromStorage(initialCase.signed_spa_url);
-        }
-
-        try {
-          const actorLabel = getNotificationProfileLabel(userId, profiles);
-          const isCancelling = nextStatus === "Cancel" && previousStatus !== "Cancel";
-          const hasNewLoDraft = enableWorkflowFields && Boolean(loDraftFile);
-          const amountLabel = formatCommissionAmount(toNumberOrNull(formData.spaPrice) ?? 0);
-          const title = isCancelling
-            ? "Sales case cancelled"
-            : hasNewLoDraft
-              ? "Signed LO draft uploaded"
-              : "Sales case updated";
-          const message = isCancelling
-            ? `${actorLabel} cancelled the sales case for ${selectedProject?.project_name || "Unnamed project"}, ${formData.unitNumber ? `Unit ${formData.unitNumber}` : "Unit -"}, SPA ${amountLabel}.`
-            : hasNewLoDraft
-              ? `${actorLabel} uploaded a signed LO draft for ${selectedProject?.project_name || "Unnamed project"}, ${formData.unitNumber ? `Unit ${formData.unitNumber}` : "Unit -"}, SPA ${amountLabel}.`
-              : `${actorLabel} updated the sales case for ${selectedProject?.project_name || "Unnamed project"}, ${formData.unitNumber ? `Unit ${formData.unitNumber}` : "Unit -"}, SPA ${amountLabel}.`;
-
-          await notifyCaseAudience({
-            actorUserId: userId,
-            salesCaseId: initialCase.id,
-            caseOwnerId,
-            involvedProfileId: formData.involvedUserId || null,
-            title,
-            message,
-            profiles,
-            commissionRows: commissionRows.map((row) => ({ profileId: row.profileId, type: row.type })),
-          });
-        } catch (notificationError) {
-          console.error("Failed to create notifications for updated sales case", notificationError);
-        }
+            await notifyCaseAudience({
+              actorUserId: userId,
+              salesCaseId: initialCase.id,
+              caseOwnerId,
+              involvedProfileId: formData.involvedUserId || null,
+              title,
+              message,
+              profiles,
+              commissionRows: commissionRows.map((row) => ({ profileId: row.profileId, type: row.type })),
+            });
+          } catch (notificationError) {
+            console.error("Failed to create notifications for updated sales case", notificationError);
+          }
+        })();
       } else {
         let { data: insertedCase, error: submitError } = await supabase
           .from("sales_cases")
@@ -1704,21 +1689,19 @@ export function SalesCaseModal({
           return;
         }
 
-        try {
-          await createCaseNotifications({
-            actorUserId: userId,
-            salesCaseId: insertedCase.id,
-            caseOwnerId,
-            involvedProfileId: formData.involvedUserId || null,
-            projectName: selectedProject?.project_name ?? null,
-            unitNumber: formData.unitNumber || null,
-            spaPrice: toNumberOrNull(formData.spaPrice),
-            profiles,
-            commissionRows: commissionRows.map((row) => ({ profileId: row.profileId, type: row.type })),
-          });
-        } catch (notificationError) {
+        void createCaseNotifications({
+          actorUserId: userId,
+          salesCaseId: insertedCase.id,
+          caseOwnerId,
+          involvedProfileId: formData.involvedUserId || null,
+          projectName: selectedProject?.project_name ?? null,
+          unitNumber: formData.unitNumber || null,
+          spaPrice: toNumberOrNull(formData.spaPrice),
+          profiles,
+          commissionRows: commissionRows.map((row) => ({ profileId: row.profileId, type: row.type })),
+        }).catch((notificationError) => {
           console.error("Failed to create notifications for new sales case", notificationError);
-        }
+        });
       }
 
       setIsSubmitting(false);
