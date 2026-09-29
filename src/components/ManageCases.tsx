@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Send } from "lucide-react";
 import { notifyCaseAudience } from "../lib/notifications";
 import { supabase } from "../lib/supabaseClient";
+import { getCaseYearMonth, getMonthFromYearMonth, getYearFromYearMonth } from "../lib/caseDate";
 import {
   getCompletedCommissionAmountForProfiles,
 } from "../lib/salesCaseMetrics";
@@ -193,39 +194,38 @@ export function ManageCases({ userId }: ManageCasesProps) {
     [profiles]
   );
 
-  const getCaseDateForMonthFilter = (record: SalesCaseRecord) => {
-    const dateValue = record.booking_date ?? record.created_at;
-    const parsedDate = dateValue ? new Date(dateValue) : null;
-
-    if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
-      return null;
-    }
-
-    return parsedDate;
-  };
+  const getCaseYearMonthForFilter = (record: SalesCaseRecord) =>
+    getCaseYearMonth(record.booking_date, record.created_at);
 
   const availableYearOptions = useMemo(() => {
-    const yearValues = new Set<string>([selectedYearValue, `${today.getFullYear()}`]);
+    const yearValues = new Set<string>([`${today.getFullYear()}`]);
 
     cases.forEach((record) => {
-      const filterDate = getCaseDateForMonthFilter(record);
+      const yearMonth = getCaseYearMonthForFilter(record);
+      const year = getYearFromYearMonth(yearMonth);
 
-      if (filterDate) {
-        yearValues.add(`${filterDate.getFullYear()}`);
+      if (year) {
+        yearValues.add(year);
       }
     });
 
-    return Array.from(yearValues).sort((left, right) => Number(right) - Number(left));
+    if (selectedYearValue !== "all") {
+      yearValues.add(selectedYearValue);
+    }
+
+    return ["all", ...Array.from(yearValues).sort((left, right) => Number(right) - Number(left))];
   }, [cases, selectedYearValue, today]);
 
   const matchesSelectedMonth = (record: SalesCaseRecord) => {
-    const filterDate = getCaseDateForMonthFilter(record);
+    const yearMonth = getCaseYearMonthForFilter(record);
+    const year = getYearFromYearMonth(yearMonth);
+    const month = getMonthFromYearMonth(yearMonth);
 
-    if (!filterDate) {
+    if (!year || !month) {
       return false;
     }
 
-    if (`${filterDate.getFullYear()}` !== selectedYearValue) {
+    if (selectedYearValue !== "all" && year !== selectedYearValue) {
       return false;
     }
 
@@ -233,7 +233,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
       return true;
     }
 
-    return `${filterDate.getMonth() + 1}`.padStart(2, "0") === selectedMonthValue;
+    return month === selectedMonthValue;
   };
 
   const matchesSelectedProject = (record: SalesCaseRecord) =>
@@ -252,8 +252,18 @@ export function ManageCases({ userId }: ManageCasesProps) {
 
   const summaryCases = useMemo(
     () => cases.filter((record) => matchesSelectedMonth(record) && matchesSelectedProject(record) && matchesSelectedAgent(record)),
-    [cases, selectedAgentId, selectedMonthValue, selectedProjectId]
+    [cases, selectedAgentId, selectedMonthValue, selectedProjectId, selectedYearValue]
   );
+
+  const resetFilters = () => {
+    setCaseSearchTerm("");
+    setStatusFilter("all");
+    setSelectedYearValue("all");
+    setSelectedMonthValue("all");
+    setSelectedProjectId("all");
+    setSelectedAgentId("all");
+    setCommissionTypeFilter("all");
+  };
 
   const filteredCases = useMemo(() => {
     const normalizedSearch = caseSearchTerm.trim().toLowerCase();
@@ -835,7 +845,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
             >
               {availableYearOptions.map((year) => (
                 <option key={year} value={year}>
-                  {year}
+                  {year === "all" ? "All years" : year}
                 </option>
               ))}
             </select>
@@ -881,6 +891,18 @@ export function ManageCases({ userId }: ManageCasesProps) {
               <option value="holding">Holding comm cases</option>
             </select>
           </div>
+        </div>
+        <div className="mb-4 flex flex-col gap-2 border-t border-gray-100 pt-3 text-xs text-gray-500 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Search applies to current filters. Showing {filteredCases.length} of {summaryCases.length} filtered cases ({cases.length} total).
+          </p>
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="inline-flex items-center justify-center rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Reset filters
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">

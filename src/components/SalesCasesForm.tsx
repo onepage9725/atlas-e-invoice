@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { fetchNotificationProfiles, notifyDeleteRequest } from "../lib/notifications";
 import { supabase } from "../lib/supabaseClient";
+import { getCaseYearMonth, getMonthFromYearMonth, getYearFromYearMonth } from "../lib/caseDate";
 import {
   getCaseCommissionStructure,
   getDirectCommissionPercentage,
@@ -129,6 +130,7 @@ type DisplaySalesCaseRow = {
   creatorLabel: string;
   createdAt: Date | null;
   bookingDate: Date | null;
+  filterYearMonth: string | null;
   status: string;
   isLocked: boolean;
   viewerCommission: number | null;
@@ -181,20 +183,6 @@ const formatAmount = (value: number | null) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
-};
-
-const getMonthInputValue = (date: Date) => {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  return `${year}-${month}`;
-};
-
-const getDateMonthValue = (date: Date | null) => {
-  if (!date || Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return getMonthInputValue(date);
 };
 
 export function SalesCasesForm({ userId }: SalesCasesFormProps) {
@@ -770,6 +758,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
       const createdAt = record.created_at ? new Date(record.created_at) : null;
       const bookingDate = record.booking_date ? new Date(record.booking_date) : createdAt;
       const status = normalizeCaseStatus(record.status);
+      const filterYearMonth = getCaseYearMonth(record.booking_date, record.created_at);
       const isLocked = isCaseLockedForEditing(record.status);
       const viewerCommissionBreakdown = getViewerCommissionBreakdown(record);
       const viewerCommission = viewerCommissionBreakdown.totalAmount;
@@ -818,6 +807,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
         creatorLabel,
         createdAt,
         bookingDate,
+        filterYearMonth,
         status,
         isLocked,
         viewerCommission,
@@ -832,18 +822,22 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
     }, []);
   }, [payoutMap, profileMap, projectMap, salesCaseRows, userId]);
 
-  const selectedMonth = selectedMonthValue === "all" ? null : `${selectedYearValue}-${selectedMonthValue}`;
-
   const availableYearOptions = useMemo(() => {
-    const yearValues = new Set<string>([selectedYearValue, `${today.getFullYear()}`]);
+    const yearValues = new Set<string>([`${today.getFullYear()}`]);
 
     displaySalesCaseRows.forEach((item) => {
-      if (item.bookingDate) {
-        yearValues.add(`${item.bookingDate.getFullYear()}`);
+      const year = getYearFromYearMonth(item.filterYearMonth);
+
+      if (year) {
+        yearValues.add(year);
       }
     });
 
-    return Array.from(yearValues).sort((left, right) => Number(right) - Number(left));
+    if (selectedYearValue !== "all") {
+      yearValues.add(selectedYearValue);
+    }
+
+    return ["all", ...Array.from(yearValues).sort((left, right) => Number(right) - Number(left))];
   }, [displaySalesCaseRows, selectedYearValue, today]);
 
   const availableProjectOptions = useMemo(
@@ -858,18 +852,29 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
     selectedProjectId === "all" || item.row.record.project_id === selectedProjectId;
 
   const selectedMonthRows = useMemo(() => {
-    if (!selectedMonth) {
-      return displaySalesCaseRows.filter((item) => matchesSelectedProject(item));
-    }
-
     return displaySalesCaseRows.filter((item) => {
-      if (getDateMonthValue(item.bookingDate) !== selectedMonth) {
+      if (!matchesSelectedProject(item)) {
         return false;
       }
 
-      return matchesSelectedProject(item);
+      const year = getYearFromYearMonth(item.filterYearMonth);
+      const month = getMonthFromYearMonth(item.filterYearMonth);
+
+      if (!year || !month) {
+        return false;
+      }
+
+      if (selectedYearValue !== "all" && selectedYearValue !== year) {
+        return false;
+      }
+
+      if (selectedMonthValue !== "all" && selectedMonthValue !== month) {
+        return false;
+      }
+
+      return true;
     });
-  }, [displaySalesCaseRows, selectedMonth, selectedProjectId]);
+  }, [displaySalesCaseRows, selectedMonthValue, selectedProjectId, selectedYearValue]);
 
   const filteredSalesCaseRows = useMemo(() => {
     return selectedMonthRows.filter((item) => {
@@ -1017,6 +1022,14 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
     [selectedMonthBaseRows]
   );
 
+  const resetFilters = () => {
+    setSelectedMonthValue("all");
+    setSelectedYearValue("all");
+    setSelectedProjectId("all");
+    setStatusFilter("all");
+    setRowTypeFilter("all");
+  };
+
   const requestDelete = async (record: SalesCaseRecord) => {
     if (record.created_by !== userId) {
       setError("Only the case creator can request deletion.");
@@ -1156,7 +1169,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
             >
               {availableYearOptions.map((year) => (
                 <option key={year} value={year}>
-                  {year}
+                  {year === "all" ? "All years" : year}
                 </option>
               ))}
             </select>
@@ -1203,6 +1216,18 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
               <option value="top_up">Top-up rows</option>
             </select>
           </div>
+        </div>
+        <div className="mb-4 flex flex-col gap-2 border-t border-gray-100 pt-3 text-xs text-gray-500 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Filters apply together. Showing {filteredSalesCaseRows.length} of {selectedMonthRows.length} filtered rows ({displaySalesCaseRows.length} visible rows).
+          </p>
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="inline-flex items-center justify-center rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Reset filters
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">
