@@ -284,7 +284,7 @@ export function ProjectCasePage() {
   };
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Project Case</h2>
         <p className="mt-1 text-sm text-gray-500">View signed LO case totals by project and inspect each signed LO record.</p>

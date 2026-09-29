@@ -1469,7 +1469,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
   const totalCashOut = totalPaidOutToAgent + totalPaidOutNonAgent;
 
   return (
-    <div className="space-y-6 px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="space-y-6 app-content-shell">
       <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-gray-900">Event Banner</h3>
@@ -1520,7 +1520,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
       </div>
 
       {isSuperAdmin ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
             <p className="text-sm font-medium text-gray-500 mb-2">Total GDV</p>
             <p className="text-2xl font-bold text-gray-900">RM {formatAmount(totalMonthlyGdv)}</p>
@@ -1645,7 +1645,7 @@ export function Dashboard({ role, rank, userId }: DashboardProps) {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <KPICard title="Vacant" value="20,000 ft²" badge="+8%" />
           <KPICard title="Vacancy Loss" value="RM15,800/mo" />
           <KPICard title="Leases due in 6 mo" value="6 leases" badge="+12%" />

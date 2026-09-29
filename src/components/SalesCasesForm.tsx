@@ -1070,7 +1070,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
   };
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Sales Cases</h2>
@@ -1132,7 +1132,7 @@ export function SalesCasesForm({ userId }: SalesCasesFormProps) {
       </div>
 
       <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-700">Filter by Month</label>
             <select

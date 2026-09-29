@@ -522,14 +522,14 @@ function App() {
             sessionUserId ? (
               <EventsForm userId={sessionUserId} />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -541,7 +541,7 @@ function App() {
           (canViewSalesCases && sessionUserId ? (
             <SalesCasesForm userId={sessionUserId} />
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -551,7 +551,7 @@ function App() {
           (canViewTeam && sessionUserId ? (
             <TeamPage userId={sessionUserId} role={normalizedProfileRole} rank={normalizedProfileRank} />
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -561,7 +561,7 @@ function App() {
           (canViewRanking && sessionUserId ? (
             <RankingPage userId={sessionUserId} />
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -571,7 +571,7 @@ function App() {
           (canViewRankProgress ? (
             <RankProgressPage role={normalizedProfileRole} userId={sessionUserId} />
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -582,14 +582,14 @@ function App() {
             sessionUserId ? (
               <ManageCases userId={sessionUserId} />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -600,14 +600,14 @@ function App() {
             sessionUserId ? (
               <CommReviewPage userId={sessionUserId} />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -622,14 +622,14 @@ function App() {
                 onNavigateToPaymentVoucher={() => handleSetActiveView("Payment Voucher")}
               />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -640,14 +640,14 @@ function App() {
             sessionUserId ? (
               <PaymentVoucherPage userId={sessionUserId} canGenerateVoucher={canViewPaymentVoucher} />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -662,14 +662,14 @@ function App() {
                 userEmail={sessionEmail}
               />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -680,14 +680,14 @@ function App() {
             sessionUserId ? (
               <FinancePage userId={sessionUserId} role={normalizedProfileRole} />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -698,14 +698,14 @@ function App() {
             sessionUserId ? (
               <EInvoicePage userId={sessionUserId} />
             ) : (
-              <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+              <div className="app-content-shell">
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                   Missing user session.
                 </div>
               </div>
             )
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
@@ -722,14 +722,14 @@ function App() {
           (isSuperAdmin ? (
             <ProjectCasePage />
           ) : (
-            <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+            <div className="app-content-shell">
               <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
                 You do not have permission to access this section.
               </div>
             </div>
           ))}
       </main>
-      <footer className="border-t border-gray-100 bg-white/90 md:ml-[220px] md:w-[calc(100%-220px)]">
+      <footer className="app-footer-shell border-t border-gray-100 bg-white/90">
         <div className="flex flex-col gap-3 px-4 py-3 text-sm text-gray-600 md:flex-row md:items-center md:justify-between md:px-8">
           <p className="font-medium text-gray-700">Atlas Olsen ERP</p>
           <div className="flex items-center gap-2 md:justify-end">

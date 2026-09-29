@@ -1236,7 +1236,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
 
   if (!canViewTeam) {
     return (
-      <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+      <div className="app-content-shell">
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-sm text-gray-600">
           You do not have permission to access this section.
         </div>
@@ -1245,7 +1245,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
   }
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       {role !== "super_admin" && currentProfile && currentProfileSummary && (
         <div className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
           <div className="mb-4">
@@ -1328,7 +1328,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
       )}
 
       <div className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-700">Track by Month</label>
             <select
@@ -1477,7 +1477,7 @@ export function TeamPage({ userId, role, rank }: TeamPageProps) {
 
       <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
         <h3 className="mb-4 text-lg font-semibold text-gray-800">Downline Sales Cases</h3>
-        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-700">Filter by Project</label>
             <select

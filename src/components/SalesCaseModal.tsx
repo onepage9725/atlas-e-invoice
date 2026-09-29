@@ -89,6 +89,36 @@ const getScopedSignedSpaStatus = (
 const normalizeAccessValue = (value: string | null | undefined) =>
   value?.trim().toLowerCase().replace(/\s+/g, "_") ?? "";
 
+const getOriginalFileNameFromUrl = (url: string | null | undefined) => {
+  if (!url) {
+    return "";
+  }
+
+  const decodeSafe = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
+  try {
+    const parsedUrl = new URL(url);
+    const queryFileName = parsedUrl.searchParams.get("filename");
+
+    if (queryFileName) {
+      return decodeSafe(queryFileName);
+    }
+
+    const pathSegment = parsedUrl.pathname.split("/").filter(Boolean).pop();
+    return pathSegment ? decodeSafe(pathSegment) : "";
+  } catch {
+    const [pathWithoutQuery] = url.split("?");
+    const pathSegment = pathWithoutQuery.split("/").filter(Boolean).pop();
+    return pathSegment ? decodeSafe(pathSegment) : "";
+  }
+};
+
 export const normalizeCaseStatus = (status: string | null | undefined): SalesCaseStatus => {
   const validStatuses = new Set<string>([
     ...CREATOR_CASE_STATUS_OPTIONS,
@@ -772,26 +802,18 @@ export function SalesCaseModal({
       race: isOtherRace ? "Other" : raceValue,
       raceOther: isOtherRace ? raceValue : "",
       buyerType: initialCase.buyer_type ?? "Loan",
-      bookingFormName: initialCase.booking_form_url
-        ? initialCase.booking_form_url.split("/").pop() ?? ""
-        : "",
+      bookingFormName: getOriginalFileNameFromUrl(initialCase.booking_form_url),
       customerIcName: initialCase.customer_ic_url
-        ? initialCase.customer_ic_url.split("/").pop() ?? ""
+        ? getOriginalFileNameFromUrl(initialCase.customer_ic_url)
         : "",
-      bookingReceiptName: initialCase.booking_receipt_url
-        ? initialCase.booking_receipt_url.split("/").pop() ?? ""
-        : "",
+      bookingReceiptName: getOriginalFileNameFromUrl(initialCase.booking_receipt_url),
       status: normalizeCaseStatus(initialCase.status),
       signedSpaStatus: isSignedSpaLocked
         ? "Complete"
         : normalizeSignedSpaStatus(initialCase.signed_spa_status, "None"),
       signedSpaDate: initialCase.signed_spa_date ?? "",
-      signedSpaName: initialCase.signed_spa_url
-        ? initialCase.signed_spa_url.split("/").pop() ?? ""
-        : "",
-      loDraftName: initialCase.lo_draft_url
-        ? initialCase.lo_draft_url.split("/").pop() ?? ""
-        : "",
+      signedSpaName: getOriginalFileNameFromUrl(initialCase.signed_spa_url),
+      loDraftName: getOriginalFileNameFromUrl(initialCase.lo_draft_url),
       signedLoDate: initialCase.signed_lo_date ?? "",
     });
     setBookingFormFile(null);
@@ -1830,7 +1852,7 @@ export function SalesCaseModal({
                           className="hidden"
                         />
                         <span className="text-xs text-gray-500">
-                          {loDraftFile?.name || formData.loDraftName || "No file selected"}
+                          {loDraftFile?.name || formData.loDraftName || getOriginalFileNameFromUrl(initialCase?.lo_draft_url) || "No file selected"}
                         </span>
                         {initialCase?.lo_draft_url && (
                           <a
@@ -1928,7 +1950,7 @@ export function SalesCaseModal({
                           className="hidden"
                         />
                         <span className="text-xs text-gray-600">
-                          {signedSpaFile?.name || formData.signedSpaName || "No file selected"}
+                          {signedSpaFile?.name || formData.signedSpaName || getOriginalFileNameFromUrl(initialCase?.signed_spa_url) || "No file selected"}
                         </span>
                         {initialCase?.signed_spa_url && (
                           <a
@@ -2180,7 +2202,7 @@ export function SalesCaseModal({
                         />
                       </label>
                       <span className="text-xs text-gray-500">
-                        {customerIcFiles[index]?.name || customer.icUrl.split("/").pop() || "No file selected"}
+                        {customerIcFiles[index]?.name || getOriginalFileNameFromUrl(customer.icUrl) || "No file selected"}
                       </span>
                       {customer.icUrl && (
                         <a
@@ -2320,7 +2342,7 @@ export function SalesCaseModal({
                   />
                 </label>
                 <span className="text-xs text-gray-500">
-                  {formData.bookingFormName || "No file selected"}
+                  {formData.bookingFormName || getOriginalFileNameFromUrl(initialCase?.booking_form_url) || "No file selected"}
                 </span>
                 {initialCase?.booking_form_url && (
                   <a
@@ -2351,7 +2373,7 @@ export function SalesCaseModal({
                   />
                 </label>
                 <span className="text-xs text-gray-500">
-                  {formData.bookingReceiptName || "No file selected"}
+                  {formData.bookingReceiptName || getOriginalFileNameFromUrl(initialCase?.booking_receipt_url) || "No file selected"}
                 </span>
                 {initialCase?.booking_receipt_url && (
                   <a

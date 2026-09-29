@@ -108,12 +108,21 @@ export const getCaseCommissionStructure = (
   project: ProjectCommissionSource | null | undefined,
 ): CommissionStructure | null => {
   const snapshot = normalizeCommissionStructure(record?.commission_structure, "case-tier");
+  const projectStructures = getProjectCommissionStructures(project);
 
   if (snapshot) {
+    const matchingProjectStructure = projectStructures.find(
+      (structure) => structure.id === snapshot.id,
+    );
+
+    if (matchingProjectStructure) {
+      return matchingProjectStructure;
+    }
+
     return snapshot;
   }
 
-  return getProjectCommissionStructures(project)[0] ?? null;
+  return getDefaultProjectCommissionStructure(project) ?? projectStructures[0] ?? null;
 };
 
 export const getDefaultProjectCommissionStructure = (

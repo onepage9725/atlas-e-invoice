@@ -562,7 +562,7 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
 
   if (!canViewPage) {
     return (
-      <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+      <div className="app-content-shell">
         <div className="rounded-xl border border-gray-100 bg-white p-6 text-sm text-gray-600 shadow-sm">
           You do not have permission to access this section.
         </div>
@@ -572,7 +572,7 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
 
   return (
     <>
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Rank Progress</h2>
@@ -580,8 +580,8 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
             Review each member&apos;s progress toward the next rank, with leader rows shown first.
           </p>
         </div>
-        <div className="grid w-full grid-cols-1 gap-3 md:w-auto md:grid-cols-3">
-          <div className="md:min-w-[180px]">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="lg:min-w-[180px]">
             <label className="mb-1 block text-xs font-medium text-gray-700">Filter by Rank</label>
             <select
               value={selectedRank}
@@ -595,7 +595,7 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
               ))}
             </select>
           </div>
-          <div className="md:min-w-[220px]">
+          <div className="lg:min-w-[220px]">
             <label className="mb-1 block text-xs font-medium text-gray-700">Filter by Leader</label>
             <select
               value={selectedLeaderId}
@@ -612,7 +612,7 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
                 ))}
             </select>
           </div>
-          <div className="md:min-w-[260px]">
+          <div className="lg:min-w-[260px] sm:col-span-2 lg:col-span-1">
             <label className="mb-1 block text-xs font-medium text-gray-700">Search User Name</label>
             <input
               type="text"
@@ -769,7 +769,7 @@ export function RankProgressPage({ role, userId }: RankProgressPageProps) {
                             </span>
                           ))}
                         </div>
-                        <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 text-right shadow-sm min-w-[220px]">
+                        <div className="w-full rounded-xl border border-gray-100 bg-white px-4 py-3 text-right shadow-sm sm:min-w-[220px]">
                           <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Total Personal Comm</p>
                           <p className="mt-1 text-sm font-semibold text-gray-900">{formatCurrencyLabel(personalCommission)}</p>
                           <p className="mt-3 text-xs font-medium uppercase tracking-wide text-gray-400">Total Team Comm</p>

@@ -257,6 +257,30 @@ const LanguageContext = createContext<LanguageContextValue | null>(null);
 type AtlasTextNode = Text & { __atlasOriginal?: string; __atlasWasTranslated?: boolean };
 type AtlasElement = HTMLElement & { __atlasAttrOriginal?: Record<string, string | null> };
 
+const getTranslatedNodeValue = (source: string) => {
+  const leadingWhitespace = source.match(/^\s*/)?.[0] ?? "";
+  const trailingWhitespace = source.match(/\s*$/)?.[0] ?? "";
+  const trimmedSource = source.trim();
+
+  if (!trimmedSource) {
+    return null;
+  }
+
+  const translated = ZH_TRANSLATIONS[trimmedSource];
+
+  if (translated) {
+    return `${leadingWhitespace}${translated}${trailingWhitespace}`;
+  }
+
+  const dynamicTranslated = translateDynamicText(trimmedSource);
+
+  if (dynamicTranslated) {
+    return `${leadingWhitespace}${dynamicTranslated}${trailingWhitespace}`;
+  }
+
+  return null;
+};
+
 const applyTranslationToTextNode = (node: AtlasTextNode, language: AppLanguage) => {
   const currentValue = node.nodeValue ?? "";
 
@@ -275,43 +299,37 @@ const applyTranslationToTextNode = (node: AtlasTextNode, language: AppLanguage) 
     return;
   }
 
-  const source = node.__atlasOriginal;
-  const leadingWhitespace = source.match(/^\s*/)?.[0] ?? "";
-  const trailingWhitespace = source.match(/\s*$/)?.[0] ?? "";
-  const trimmedSource = source.trim();
+  const sourceBeforeSync = node.__atlasOriginal ?? "";
+  const expectedTranslatedBeforeSync = getTranslatedNodeValue(sourceBeforeSync);
 
-  if (!trimmedSource) {
-    return;
-  }
-
-  const translated = ZH_TRANSLATIONS[trimmedSource];
-
-  if (translated) {
-    const nextValue = `${leadingWhitespace}${translated}${trailingWhitespace}`;
-
-    if (node.nodeValue !== nextValue) {
-      node.nodeValue = nextValue;
+  // If the app updates text while Chinese mode is active (for example async file name loads),
+  // refresh the source text so stale translated values do not overwrite the latest UI value.
+  if (node.__atlasWasTranslated) {
+    if (
+      expectedTranslatedBeforeSync &&
+      currentValue !== expectedTranslatedBeforeSync &&
+      currentValue !== sourceBeforeSync
+    ) {
+      node.__atlasOriginal = currentValue;
+      node.__atlasWasTranslated = false;
     }
+  } else if (currentValue !== sourceBeforeSync) {
+    node.__atlasOriginal = currentValue;
+  }
 
-    node.__atlasWasTranslated = true;
+  const source = node.__atlasOriginal ?? "";
+  const nextValue = getTranslatedNodeValue(source);
 
+  if (!nextValue) {
+    node.__atlasWasTranslated = false;
     return;
   }
 
-  const dynamicTranslated = translateDynamicText(trimmedSource);
-
-  if (dynamicTranslated) {
-    const nextValue = `${leadingWhitespace}${dynamicTranslated}${trailingWhitespace}`;
-
-    if (node.nodeValue !== nextValue) {
-      node.nodeValue = nextValue;
-    }
-
-    node.__atlasWasTranslated = true;
-    return;
+  if (node.nodeValue !== nextValue) {
+    node.nodeValue = nextValue;
   }
 
-  node.__atlasWasTranslated = false;
+  node.__atlasWasTranslated = true;
 };
 
 const applyTranslationToElementAttributes = (element: AtlasElement, language: AppLanguage) => {

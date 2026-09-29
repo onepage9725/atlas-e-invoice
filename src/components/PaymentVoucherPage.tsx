@@ -2066,7 +2066,7 @@ export function PaymentVoucherPage({
   const pendingCaseCount = groupedCases.length;
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Payment Voucher</h2>

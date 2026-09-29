@@ -706,7 +706,7 @@ export function RankingPage({ userId }: RankingPageProps) {
   };
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Ranking</h2>
         <p className="mt-1 text-sm text-gray-500">
@@ -721,7 +721,7 @@ export function RankingPage({ userId }: RankingPageProps) {
       )}
 
       <div className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-700">Track by Month</label>
             <select

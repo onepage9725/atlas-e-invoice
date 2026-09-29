@@ -222,7 +222,7 @@ export function Sidebar({
           className="fixed inset-0 z-20 bg-black/40 md:hidden"
         />
       )}
-      <aside className={`fixed left-0 top-0 z-30 flex h-screen w-[220px] flex-col border-r border-gray-100 bg-white shadow-sm transition-transform duration-200 md:z-10 ${
+      <aside className={`fixed left-0 top-0 z-30 flex h-screen w-[86vw] max-w-[220px] flex-col border-r border-gray-100 bg-white shadow-sm transition-transform duration-200 md:w-[220px] md:max-w-none md:z-10 ${
         isOpen
           ? "translate-x-0 pointer-events-auto"
           : isDesktopCollapsed

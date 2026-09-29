@@ -645,7 +645,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
   };
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">E-Invoice</h2>
@@ -830,7 +830,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-700">INVOICE NUMBER</label>
                   <input
@@ -890,7 +890,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
                               type="text"
                               value={line.itemDescription}
                               onChange={(event) => updateLine(index, "itemDescription", event.target.value)}
-                              className="w-full min-w-[220px] rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                              className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm sm:min-w-[220px]"
                               placeholder="Claim for complete SPA signing"
                             />
                           </td>
@@ -999,7 +999,7 @@ export function EInvoicePage({ userId }: EInvoicePageProps) {
             </div>
 
             <form onSubmit={handleSaveReceive} className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-700">RECEIVE AMOUNT (RM)</label>
                   <input

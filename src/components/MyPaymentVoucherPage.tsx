@@ -563,7 +563,7 @@ export function MyPaymentVoucherPage({
   };
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900">My Payment Voucher</h2>
         <p className="mt-1 text-sm text-gray-500">
@@ -591,7 +591,7 @@ export function MyPaymentVoucherPage({
       <div className="rounded-xl border border-gray-100 bg-white shadow-sm">
         <div className="border-b border-gray-100 px-4 py-3">
           <div className="text-sm font-semibold text-gray-800">Payment Voucher History</div>
-          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <input
               type="date"
               value={dateFrom}

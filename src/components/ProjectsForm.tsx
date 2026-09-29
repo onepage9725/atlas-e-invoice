@@ -1133,7 +1133,7 @@ export function ProjectsForm({ role, userId }: ProjectsFormProps) {
   };
 
   return (
-    <div className="px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="app-content-shell">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Projects</h2>

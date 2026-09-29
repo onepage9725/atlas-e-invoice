@@ -178,7 +178,7 @@ export function ProfilePage({ userId, role, onProfileUpdated }: ProfilePageProps
   };
 
   return (
-    <div className="space-y-6 px-4 pb-8 pt-20 md:ml-[220px] md:w-[calc(100%-220px)] md:px-8 md:pb-12 md:pt-24">
+    <div className="space-y-6 app-content-shell">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Profile</h2>

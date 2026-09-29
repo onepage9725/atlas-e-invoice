@@ -156,8 +156,8 @@ export function Header({
   };
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-20 flex h-16 items-center justify-between border-b border-gray-100 bg-white px-4 md:left-[220px] md:px-8">
-      <div className="flex items-center gap-4">
+    <header className="app-header-shell fixed right-0 top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-gray-100 bg-white px-4 md:px-8">
+      <div className="flex min-w-0 items-center gap-2 md:gap-4">
         <button
           type="button"
           onClick={onMenuClick}
@@ -166,10 +166,10 @@ export function Header({
         >
           <Menu className="h-5 w-5" />
         </button>
-        <h2 className="text-lg font-semibold text-gray-800 md:text-xl">{pageTitle}</h2>
+        <h2 className="truncate text-base font-semibold text-gray-800 md:text-xl">{pageTitle}</h2>
       </div>
       
-      <div className="flex items-center gap-3 md:gap-6">
+      <div className="flex items-center gap-2 md:gap-6">
         <div className="text-xs text-gray-500 hidden md:block">{displayName}</div>
         <button
           type="button"
@@ -249,7 +249,7 @@ export function Header({
           role="switch"
           aria-checked={language !== "en"}
           onClick={toggleLanguage}
-          className="inline-flex h-8 items-center gap-2 rounded-full border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-50"
+          className="hidden h-8 items-center gap-2 rounded-full border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 sm:inline-flex"
           title={language === "en" ? "Switch to Chinese" : "切换到英文"}
           aria-label={language === "en" ? "Switch to Chinese" : "切换到英文"}
         >
