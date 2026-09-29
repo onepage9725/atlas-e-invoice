@@ -8,7 +8,6 @@ import {
 } from "../lib/salesCaseMetrics";
 import {
   getCaseCommissionStructure,
-  getHoldingCommissionPercentage,
 } from "../lib/commissionStructures";
 import {
   getCaseStatusClasses,
@@ -155,7 +154,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
   const [selectedMonthValue, setSelectedMonthValue] = useState<string>(() => `${today.getMonth() + 1}`.padStart(2, "0"));
   const [selectedProjectId, setSelectedProjectId] = useState("all");
   const [selectedAgentId, setSelectedAgentId] = useState("all");
-  const [commissionTypeFilter, setCommissionTypeFilter] = useState<"all" | "direct" | "holding">("all");
 
   const caseWorkflowEnabled = useMemo(
     () => cases.some((record) => hasCaseWorkflowColumns(record)),
@@ -244,12 +242,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
     record.created_by === selectedAgentId ||
     (record.involved_user_ids ?? []).includes(selectedAgentId);
 
-  const hasHoldingCommission = (record: SalesCaseRecord) => {
-    const project = record.project_id ? projectMap.get(record.project_id) ?? null : null;
-    const commissionStructure = getCaseCommissionStructure(record, project);
-    return getHoldingCommissionPercentage(commissionStructure) > 0;
-  };
-
   const summaryCases = useMemo(
     () => cases.filter((record) => matchesSelectedMonth(record) && matchesSelectedProject(record) && matchesSelectedAgent(record)),
     [cases, selectedAgentId, selectedMonthValue, selectedProjectId, selectedYearValue]
@@ -262,7 +254,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
     setSelectedMonthValue("all");
     setSelectedProjectId("all");
     setSelectedAgentId("all");
-    setCommissionTypeFilter("all");
   };
 
   const filteredCases = useMemo(() => {
@@ -288,10 +279,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
         return false;
       }
 
-      if (commissionTypeFilter === "holding" && !hasHoldingCommission(record)) {
-        return false;
-      }
-
       if (!normalizedSearch) {
         return true;
       }
@@ -299,7 +286,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
       return [creator, relatedMembers, projectName, record.unit_number || ""]
         .some((value) => value.toLowerCase().includes(normalizedSearch));
     });
-  }, [caseSearchTerm, commissionTypeFilter, payoutMap, profileMap, projectMap, statusFilter, summaryCases]);
+  }, [caseSearchTerm, payoutMap, profileMap, projectMap, statusFilter, summaryCases]);
 
   const availableProjectOptions = useMemo(
     () =>
@@ -877,18 +864,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
                   {option}
                 </option>
               ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-700">Filter by Comm Type</label>
-            <select
-              value={commissionTypeFilter}
-              onChange={(event) => setCommissionTypeFilter(event.target.value as "all" | "direct" | "holding")}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary bg-white"
-            >
-              <option value="all">All comm types</option>
-              <option value="direct">Direct comm cases</option>
-              <option value="holding">Holding comm cases</option>
             </select>
           </div>
         </div>
