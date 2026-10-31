@@ -77,6 +77,7 @@ type VoucherHistoryMeta = {
   profileIds: string[];
   memberLabels: string[];
   commissionLabels: string[];
+  unitRateLabels?: string[];
   bookingFormUrls: string[];
   icNo?: string;
   refNo?: string;
@@ -88,9 +89,12 @@ type VoucherHistoryDisplayRow = {
   id: string;
   amount: number;
   attachmentUrl: string | null;
+  referenceDetail: string | null;
   generatedAt: string;
   memberLabel: string;
   detailsLabel: string;
+  commissionLabel: string;
+  unitRateLabel: string;
   bookingFormUrls: string[];
   salesCaseIds: string[];
 };
@@ -214,6 +218,7 @@ const parseVoucherHistoryDetail = (referenceDetail: string | null | undefined) =
       detailsLabel: "-",
       memberLabel: "-",
       commissionLabel: "-",
+      unitRateLabel: "-",
       bookingFormUrls: [] as string[],
       salesCaseIds: [] as string[],
     };
@@ -248,6 +253,7 @@ const parseVoucherHistoryDetail = (referenceDetail: string | null | undefined) =
       detailsLabel: legacyDetails || "-",
       memberLabel: members.length ? Array.from(new Set(members)).join(", ") : "-",
       commissionLabel: "-",
+      unitRateLabel: "-",
       bookingFormUrls: [] as string[],
       salesCaseIds: [] as string[],
     };
@@ -258,6 +264,7 @@ const parseVoucherHistoryDetail = (referenceDetail: string | null | undefined) =
     const parsedMeta = JSON.parse(metaJson) as VoucherHistoryMeta;
     const memberLabel = Array.from(new Set((parsedMeta.memberLabels ?? []).filter(Boolean))).join(", ");
     const commissionLabel = Array.from(new Set((parsedMeta.commissionLabels ?? []).filter(Boolean))).join(", ");
+    const unitRateLabel = Array.from(new Set((parsedMeta.unitRateLabels ?? []).filter(Boolean))).join(", ");
     const bookingFormUrls = Array.from(new Set((parsedMeta.bookingFormUrls ?? []).filter(Boolean)));
     const salesCaseIds = Array.from(new Set((parsedMeta.salesCaseIds ?? []).filter(Boolean)));
 
@@ -265,6 +272,7 @@ const parseVoucherHistoryDetail = (referenceDetail: string | null | undefined) =
       detailsLabel,
       memberLabel: memberLabel || "-",
       commissionLabel: commissionLabel || "-",
+      unitRateLabel: unitRateLabel || "-",
       bookingFormUrls,
       salesCaseIds,
     };
@@ -273,6 +281,7 @@ const parseVoucherHistoryDetail = (referenceDetail: string | null | undefined) =
       detailsLabel,
       memberLabel: "-",
       commissionLabel: "-",
+      unitRateLabel: "-",
       bookingFormUrls: [] as string[],
       salesCaseIds: [] as string[],
     };
@@ -348,40 +357,261 @@ const sanitizeVoucherFileName = (value: string) =>
   value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/%/g, " pct")
     .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/[^a-zA-Z0-9._ -]+/g, " ")
+    .replace(/[^a-zA-Z0-9._ %,() -]+/g, " ")
     .replace(/\s+/g, " ")
     .replace(/-+/g, "-")
     .trim()
     .slice(0, 160)
     .replace(/^[.-]+|[.-]+$/g, "");
 
-const buildVoucherFileName = (rows: VoucherBreakdownRow[]) => {
-  const memberLabel = rows[0]?.memberLabel || "Member";
+type UnitRateRecord = {
+  projectName: string;
+  unitLabel: string;
+  rateLabel: string;
+};
 
-  const directRows = rows.filter((row) => row.agentCommissionPercentage > 0);
-  const leadRow = (directRows.length > 0 ? directRows[0] : rows[0]) ?? null;
+const normalizeRateLabel = (rateLabel: string) => {
+  const trimmedRate = rateLabel.trim();
 
-  const leadSegment = leadRow
-    ? `${leadRow.projectName} ${leadRow.unitLabel} ${formatPercentage(
-        leadRow.agentCommissionPercentage > 0 ? leadRow.agentCommissionPercentage : leadRow.commissionPercentage
-      )}`
-    : "";
+  if (!trimmedRate || trimmedRate === "-") {
+    return "0%";
+  }
 
-  const overridingUnits = Array.from(
-    new Set(
-      rows
-        .filter((row) => row.preLeaderOverridePercentage > 0 || row.leaderOverridePercentage > 0)
-        .map((row) => row.unitLabel)
-        .filter(Boolean)
-    )
+  return trimmedRate;
+};
+
+const formatUnitRateRecords = (records: UnitRateRecord[]) => {
+  const dedupedRecords: UnitRateRecord[] = [];
+  const seen = new Set<string>();
+
+  records.forEach((record) => {
+    const projectName = record.projectName.trim() || "-";
+    const unitLabel = record.unitLabel.trim() || "-";
+    const rateLabel = normalizeRateLabel(record.rateLabel);
+    const dedupeKey = `${projectName}|||${unitLabel}|||${rateLabel}`;
+
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+
+    seen.add(dedupeKey);
+    dedupedRecords.push({ projectName, unitLabel, rateLabel });
+  });
+
+  if (dedupedRecords.length === 0) {
+    return "";
+  }
+
+  const uniqueProjects = Array.from(
+    new Set(dedupedRecords.map((record) => record.projectName).filter((name) => name && name !== "-"))
+  );
+  const singleProject = uniqueProjects.length === 1 ? uniqueProjects[0] : null;
+
+  return dedupedRecords
+    .map((record, index) => {
+      const unitText = record.unitLabel && record.unitLabel !== "-" ? record.unitLabel : "Unit";
+      const projectText = record.projectName && record.projectName !== "-" ? record.projectName : "";
+      const shouldPrefixProject = !singleProject || index === 0;
+      const locationText = shouldPrefixProject && projectText ? `${projectText} ${unitText}` : unitText;
+      return `${locationText} (${normalizeRateLabel(record.rateLabel)})`;
+    })
+    .join(", ");
+};
+
+const buildUnitRateLabelFromRows = (rows: VoucherBreakdownRow[]) =>
+  formatUnitRateRecords(
+    rows.map((row) => ({
+      projectName: row.projectName,
+      unitLabel: row.unitLabel,
+      rateLabel: normalizeRateLabel(formatPercentage(row.commissionPercentage)),
+    }))
   );
 
-  const overridingSegment = overridingUnits.length > 0 ? ` Overriding ${overridingUnits.join(", ")}` : "";
-  const rawName = `Payment Voucher ${memberLabel} ${leadSegment}${overridingSegment}`.trim();
+const buildVoucherFileName = (rows: VoucherBreakdownRow[]) => {
+  const memberLabel = rows[0]?.memberLabel || "Member";
+  const unitRateLabel = buildUnitRateLabelFromRows(rows);
+  const rawName = `Payment Voucher ${memberLabel} ${unitRateLabel}`.trim();
 
   return `${sanitizeVoucherFileName(rawName)}.pdf`;
+};
+
+const buildVoucherDownloadNameFromHistory = (history: VoucherHistoryDisplayRow, resolvedUnitRateLabel?: string) => {
+  const normalizeLabelValue = (value: string | null | undefined) => {
+    const normalized = (value ?? "").trim();
+    return normalized && normalized !== "-" ? normalized : "";
+  };
+  const memberSegment = history.memberLabel && history.memberLabel !== "-" ? history.memberLabel : "Member";
+  const detailSegments = history.detailsLabel
+    .split(";")
+    .map((segment) => segment.split("|")[0]?.trim() || "")
+    .filter(Boolean);
+  const commissionSegments = history.commissionLabel
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "-");
+  const fallbackRecords = detailSegments
+    .map((segment, index) => {
+      const matched = segment.match(/^(.*?)\s+Unit\s+(.+?)(?:\s+\(([^)]+)\))?$/i);
+      if (!matched) {
+        return null;
+      }
+
+      const inlineRateLabel = matched[3]?.trim() || "";
+      const rateLabel =
+        inlineRateLabel ||
+        commissionSegments[index] ||
+        (commissionSegments.length === 1 ? commissionSegments[0] : "");
+
+      return {
+        projectName: matched[1]?.trim() || "-",
+        unitLabel: matched[2]?.trim() || "-",
+        rateLabel: normalizeRateLabel(rateLabel),
+      } satisfies UnitRateRecord;
+    })
+    .filter((record): record is UnitRateRecord => Boolean(record));
+  const fallbackUnitRateLabel = formatUnitRateRecords(fallbackRecords);
+  const legacyDetailRateLabel = detailSegments
+    .map((segment, index) => {
+      const locationText = segment.replace(/\s+/g, " ").trim();
+      if (!locationText) {
+        return "";
+      }
+
+      const inlineRateMatch = locationText.match(/\(([^)]+)\)\s*$/);
+      const inlineRateLabel = inlineRateMatch?.[1]?.trim() ?? "";
+      const rawRateLabel =
+        inlineRateLabel ||
+        commissionSegments[index] ||
+        (commissionSegments.length === 1 ? commissionSegments[0] : "");
+      const normalizedRateLabel = normalizeRateLabel(rawRateLabel);
+      const locationWithoutInlineRate = locationText.replace(/\s*\([^)]+\)\s*$/, "").trim();
+
+      return `${locationWithoutInlineRate} (${normalizedRateLabel})`;
+    })
+    .filter(Boolean)
+    .join(", ");
+  const detailSegment =
+    normalizeLabelValue(resolvedUnitRateLabel) ||
+    normalizeLabelValue(history.unitRateLabel) ||
+    normalizeLabelValue(fallbackUnitRateLabel) ||
+    normalizeLabelValue(legacyDetailRateLabel);
+  const fallbackDetailSegment = history.detailsLabel
+    .split(";")[0]
+    ?.split("|")[0]
+    ?.replace(/\bUnit\s+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const fallbackCommissionSegment = history.commissionLabel && history.commissionLabel !== "-"
+    ? history.commissionLabel.split(",")[0]?.trim() || ""
+    : "";
+
+  const rawName = detailSegment
+    ? `Payment Voucher ${memberSegment} ${detailSegment}`
+    : `Payment Voucher ${memberSegment} ${fallbackDetailSegment || ""} ${fallbackCommissionSegment}`.trim();
+  return `${sanitizeVoucherFileName(rawName)}.pdf`;
+};
+
+const resolveUnitRateLabelFromHistoryMeta = async (referenceDetail: string | null | undefined) => {
+  const historyMeta = parseVoucherHistoryMeta(referenceDetail);
+  const storedUnitRateLabels = Array.from(new Set((historyMeta?.unitRateLabels ?? []).filter(Boolean)));
+
+  if (storedUnitRateLabels.length > 0) {
+    return storedUnitRateLabels.join(", ");
+  }
+
+  const componentPayments = historyMeta?.componentPayments ?? [];
+  const payoutIds = Array.from(new Set(componentPayments.map((item) => item.payoutId).filter(Boolean)));
+
+  if (payoutIds.length === 0) {
+    return "";
+  }
+
+  const { data: payoutRows, error: payoutError } = await supabase
+    .from("sales_case_payouts")
+    .select(
+      "id, sales_case_id, agent_commission_percentage, pre_leader_override_percentage, leader_override_percentage"
+    )
+    .in("id", payoutIds);
+
+  if (payoutError || !payoutRows) {
+    return "";
+  }
+
+  const payoutById = new Map(
+    (payoutRows as Array<{
+      id: string;
+      sales_case_id: string;
+      agent_commission_percentage: number;
+      pre_leader_override_percentage: number;
+      leader_override_percentage: number;
+    }>).map((row) => [row.id, row])
+  );
+
+  const salesCaseIds = Array.from(new Set(Array.from(payoutById.values()).map((row) => row.sales_case_id).filter(Boolean)));
+
+  if (salesCaseIds.length === 0) {
+    return "";
+  }
+
+  const { data: salesCaseRows, error: salesCaseError } = await supabase
+    .from("sales_cases")
+    .select("id, project_id, unit_number")
+    .in("id", salesCaseIds);
+
+  if (salesCaseError || !salesCaseRows) {
+    return "";
+  }
+
+  const salesCaseById = new Map(
+    (salesCaseRows as Array<{ id: string; project_id: string | null; unit_number: string | null }>).map((row) => [row.id, row])
+  );
+  const projectIds = Array.from(
+    new Set(Array.from(salesCaseById.values()).map((row) => row.project_id).filter((projectId): projectId is string => Boolean(projectId)))
+  );
+
+  let projectById = new Map<string, string>();
+
+  if (projectIds.length > 0) {
+    const { data: projectRows, error: projectError } = await supabase
+      .from("projects")
+      .select("id, project_name")
+      .in("id", projectIds);
+
+    if (!projectError && projectRows) {
+      projectById = new Map(
+        (projectRows as Array<{ id: string; project_name: string | null }>).map((row) => [row.id, row.project_name ?? "-"])
+      );
+    }
+  }
+
+  const unitRateRecords: UnitRateRecord[] = componentPayments
+    .map((item) => {
+      const payout = payoutById.get(item.payoutId);
+      if (!payout) {
+        return null;
+      }
+
+      const salesCase = salesCaseById.get(payout.sales_case_id);
+      if (!salesCase) {
+        return null;
+      }
+
+      const fallbackPercentage =
+        payout.agent_commission_percentage +
+        payout.pre_leader_override_percentage +
+        payout.leader_override_percentage;
+      const percentage = Number.isFinite(item.releasePercentage ?? NaN) ? Number(item.releasePercentage) : fallbackPercentage;
+
+      return {
+        projectName: (salesCase.project_id && projectById.get(salesCase.project_id)) || "-",
+        unitLabel: salesCase.unit_number || "-",
+        rateLabel: formatPercentage(percentage),
+      } satisfies UnitRateRecord;
+    })
+    .filter((record): record is UnitRateRecord => Boolean(record));
+
+  return formatUnitRateRecords(unitRateRecords);
 };
 
 const getVoucherClaimHeading = (row: VoucherBreakdownRow) => {
@@ -1245,9 +1475,12 @@ export function PaymentVoucherPage({
           id: history.id,
           amount: deriveGrossAmountFromHistory(history.amount ?? 0, history.reference_detail),
           attachmentUrl: history.attachment_url,
+          referenceDetail: history.reference_detail,
           generatedAt: history.transacted_at || history.created_at,
           memberLabel: parsed.memberLabel,
           detailsLabel: parsed.detailsLabel,
+          commissionLabel: parsed.commissionLabel,
+          unitRateLabel: parsed.unitRateLabel,
           bookingFormUrls: parsed.bookingFormUrls,
           salesCaseIds: parsed.salesCaseIds,
         };
@@ -1503,6 +1736,7 @@ export function PaymentVoucherPage({
       const thirdLineY = currentY + 28;
       const projectLineY = shouldRenderHeading ? secondLineY : firstLineY;
       const nettPriceY = shouldRenderHeading ? thirdLineY : secondLineY;
+      const valueLineY = shouldRenderHeading ? secondLineY : firstLineY;
 
       doc.text(String(index + 1), (col.x0 + col.x1) / 2, firstLineY, { align: "center" });
 
@@ -1517,9 +1751,9 @@ export function PaymentVoucherPage({
       const nettPriceLabel = row.nettPrice !== null ? `RM ${formatAmount(row.nettPrice)}` : "-";
       doc.text(`Net purchase price: ${nettPriceLabel}`, col.x1 + 8, nettPriceY);
 
-      doc.text("1", (col.x2 + col.x3) / 2, firstLineY, { align: "center" });
-      doc.text(formatPercentage(row.commissionPercentage), (col.x3 + col.x4) / 2, firstLineY, { align: "center" });
-      doc.text(`RM ${formatAmount(row.amount)}`, col.x5 - 8, firstLineY, { align: "right" });
+      doc.text("1", (col.x2 + col.x3) / 2, valueLineY, { align: "center" });
+      doc.text(formatPercentage(row.commissionPercentage), (col.x3 + col.x4) / 2, valueLineY, { align: "center" });
+      doc.text(`RM ${formatAmount(row.amount)}`, col.x5 - 8, valueLineY, { align: "right" });
 
       currentY += itemBlockHeight;
       previousHeading = claimHeading;
@@ -1713,6 +1947,10 @@ export function PaymentVoucherPage({
       const selectedCommissionLabels = Array.from(
         new Set(payableRows.map((row) => formatPercentage(row.commissionPercentage)).filter((label) => label !== "-"))
       );
+      const selectedUnitRateLabels = buildUnitRateLabelFromRows(payableRows)
+        .split(",")
+        .map((label) => label.trim())
+        .filter(Boolean);
       const selectedBookingFormUrls = Array.from(
         new Set(
           payableRows
@@ -1734,6 +1972,7 @@ export function PaymentVoucherPage({
         profileIds: selectedProfileIds,
         memberLabels: selectedMemberLabels,
         commissionLabels: selectedCommissionLabels,
+        unitRateLabels: selectedUnitRateLabels,
         bookingFormUrls: selectedBookingFormUrls,
         icNo: normalizedIcNo,
         refNo: normalizedRefNo,
@@ -1997,7 +2236,9 @@ export function PaymentVoucherPage({
     setSuccess("Payment voucher history deleted successfully.");
   };
 
-  const handleDownloadVoucher = async (attachmentUrl: string | null) => {
+  const handleDownloadVoucher = async (history: VoucherHistoryDisplayRow) => {
+    const { attachmentUrl } = history;
+
     if (!attachmentUrl) {
       return;
     }
@@ -2018,8 +2259,218 @@ export function PaymentVoucherPage({
       return;
     }
 
-    const fileName = attachmentPath.split("/").pop() || "payment-voucher.pdf";
-    const objectUrl = URL.createObjectURL(data);
+    const historyMeta = parseVoucherHistoryMeta(history.referenceDetail);
+    let payoutIdsFromMeta = Array.from(
+      new Set(
+        ((historyMeta?.componentPayments ?? []).length > 0
+          ? (historyMeta?.componentPayments ?? []).map((item) => item.payoutId)
+          : historyMeta?.payoutIds ?? []
+        ).filter(Boolean)
+      )
+    );
+
+    if (payoutIdsFromMeta.length === 0) {
+      const { data: payoutRowsByReceipt, error: payoutRowsByReceiptError } = await supabase
+        .from("sales_case_payouts")
+        .select("id")
+        .eq("payment_receipt_url", attachmentUrl);
+
+      if (!payoutRowsByReceiptError && payoutRowsByReceipt) {
+        payoutIdsFromMeta = Array.from(
+          new Set(
+            (payoutRowsByReceipt as Array<{ id: string }>)
+              .map((row) => row.id)
+              .filter(Boolean)
+          )
+        );
+      }
+    }
+
+    let rowsFromHistory: VoucherBreakdownRow[] = [];
+
+    if (payoutIdsFromMeta.length > 0) {
+      const { data: payoutRows, error: payoutError } = await supabase
+        .from("sales_case_payouts")
+        .select(
+          "id, sales_case_id, profile_id, payout_type, source_commission_structure_id, target_commission_structure_id, source_commission_structure_label, target_commission_structure_label, agent_commission_percentage, pre_leader_override_percentage, leader_override_percentage, total_amount"
+        )
+        .in("id", payoutIdsFromMeta);
+
+      if (!payoutError && payoutRows) {
+        const payoutsById = new Map(
+          (payoutRows as SalesCasePayoutRecord[]).map((row) => [row.id, row])
+        );
+        const salesCaseIds = Array.from(
+          new Set((payoutRows as SalesCasePayoutRecord[]).map((row) => row.sales_case_id).filter(Boolean))
+        );
+        const profileIds = Array.from(
+          new Set((payoutRows as SalesCasePayoutRecord[]).map((row) => row.profile_id).filter(Boolean))
+        );
+
+        let resolvedCaseMap = caseMap;
+        if (salesCaseIds.length > 0) {
+          const missingCaseIds = salesCaseIds.filter((id) => !resolvedCaseMap.has(id));
+          if (missingCaseIds.length > 0) {
+            const { data: missingCases, error: missingCasesError } = await supabase
+              .from("sales_cases")
+              .select("*")
+              .in("id", missingCaseIds);
+
+            if (!missingCasesError && missingCases) {
+              resolvedCaseMap = new Map(caseMap);
+              (missingCases as SalesCaseRecord[]).forEach((entry) => resolvedCaseMap.set(entry.id, entry));
+            }
+          }
+        }
+
+        let resolvedProjectMap = projectMap;
+        const requiredProjectIds = Array.from(
+          new Set(
+            salesCaseIds
+              .map((id) => resolvedCaseMap.get(id)?.project_id ?? null)
+              .filter((projectId): projectId is string => Boolean(projectId))
+          )
+        );
+        if (requiredProjectIds.length > 0) {
+          const missingProjectIds = requiredProjectIds.filter((id) => !resolvedProjectMap.has(id));
+          if (missingProjectIds.length > 0) {
+            const { data: missingProjects, error: missingProjectsError } = await supabase
+              .from("projects")
+              .select("id, project_name")
+              .in("id", missingProjectIds);
+
+            if (!missingProjectsError && missingProjects) {
+              resolvedProjectMap = new Map(projectMap);
+              (missingProjects as ProjectOption[]).forEach((entry) => resolvedProjectMap.set(entry.id, entry));
+            }
+          }
+        }
+
+        let resolvedProfileMap = profileMap;
+        if (profileIds.length > 0) {
+          const missingProfileIds = profileIds.filter((id) => !resolvedProfileMap.has(id));
+          if (missingProfileIds.length > 0) {
+            const { data: missingProfiles, error: missingProfilesError } = await supabase
+              .from("profiles")
+              .select("id, name, email")
+              .in("id", missingProfileIds);
+
+            if (!missingProfilesError && missingProfiles) {
+              resolvedProfileMap = new Map(profileMap);
+              (missingProfiles as ProfileOption[]).forEach((entry) => resolvedProfileMap.set(entry.id, entry));
+            }
+          }
+        }
+
+        const componentPayments = historyMeta?.componentPayments ?? [];
+        const componentRows =
+          componentPayments.length > 0
+            ? componentPayments.map((componentPayment) => {
+                const payout = payoutsById.get(componentPayment.payoutId);
+                if (!payout) {
+                  return null;
+                }
+
+                const relatedCase = resolvedCaseMap.get(payout.sales_case_id) ?? null;
+                const relatedProject = relatedCase?.project_id
+                  ? resolvedProjectMap.get(relatedCase.project_id) ?? null
+                  : null;
+                const relatedProfile = resolvedProfileMap.get(payout.profile_id) ?? null;
+                const componentKey = componentPayment.componentKey ?? "";
+                const componentCategory: "claim" | "override" =
+                  componentKey.includes("pre-leader-override") || componentKey.includes("leader-override")
+                    ? "override"
+                    : "claim";
+                const fallbackPercentage =
+                  payout.agent_commission_percentage +
+                  payout.pre_leader_override_percentage +
+                  payout.leader_override_percentage;
+
+                return {
+                  id: componentKey || `${payout.id}-comm`,
+                  salesCaseId: payout.sales_case_id,
+                  projectName: relatedProject?.project_name || "-",
+                  unitLabel: relatedCase?.unit_number || "-",
+                  signedLoDate: relatedCase?.signed_lo_date ?? null,
+                  nettPrice: relatedCase?.nett_price ?? null,
+                  profileId: payout.profile_id,
+                  memberLabel: relatedProfile?.name || relatedProfile?.email || "-",
+                  agentCommissionPercentage: payout.agent_commission_percentage,
+                  preLeaderOverridePercentage: payout.pre_leader_override_percentage,
+                  leaderOverridePercentage: payout.leader_override_percentage,
+                  commissionPercentage:
+                    Number.isFinite(componentPayment.releasePercentage ?? NaN)
+                      ? Number(componentPayment.releasePercentage)
+                      : fallbackPercentage,
+                  amount: Number(componentPayment.amount ?? payout.total_amount),
+                  isHoldingComm: isReleasedHoldingPayout(payout),
+                  componentCategory,
+                } satisfies VoucherBreakdownRow;
+              })
+            : (payoutRows as SalesCasePayoutRecord[]).map((payout) => {
+                const relatedCase = resolvedCaseMap.get(payout.sales_case_id) ?? null;
+                const relatedProject = relatedCase?.project_id
+                  ? resolvedProjectMap.get(relatedCase.project_id) ?? null
+                  : null;
+                const relatedProfile = resolvedProfileMap.get(payout.profile_id) ?? null;
+                const totalPercentage =
+                  payout.agent_commission_percentage +
+                  payout.pre_leader_override_percentage +
+                  payout.leader_override_percentage;
+
+                return {
+                  id: `${payout.id}-comm`,
+                  salesCaseId: payout.sales_case_id,
+                  projectName: relatedProject?.project_name || "-",
+                  unitLabel: relatedCase?.unit_number || "-",
+                  signedLoDate: relatedCase?.signed_lo_date ?? null,
+                  nettPrice: relatedCase?.nett_price ?? null,
+                  profileId: payout.profile_id,
+                  memberLabel: relatedProfile?.name || relatedProfile?.email || "-",
+                  agentCommissionPercentage: payout.agent_commission_percentage,
+                  preLeaderOverridePercentage: payout.pre_leader_override_percentage,
+                  leaderOverridePercentage: payout.leader_override_percentage,
+                  commissionPercentage: totalPercentage,
+                  amount: Number(payout.total_amount ?? 0),
+                  isHoldingComm: isReleasedHoldingPayout(payout),
+                  componentCategory: "claim",
+                } satisfies VoucherBreakdownRow;
+              });
+
+        rowsFromHistory = componentRows.filter((row): row is VoucherBreakdownRow => Boolean(row));
+      }
+    }
+
+    const deductionText = (history.referenceDetail ?? "").toLowerCase();
+    const deductionOptions = {
+      deductSst: deductionText.includes("deduct sst 8%"),
+      deductWithholdingTax:
+        deductionText.includes("deduct wht 2%") || deductionText.includes("deduct withholding tax 2%"),
+    };
+    const voucherInfo = {
+      icNo: historyMeta?.icNo ?? "-",
+      refNo: historyMeta?.refNo ?? "-",
+      chequersNo: historyMeta?.chequersNo ?? "-",
+    };
+
+    const downloadBlob =
+      rowsFromHistory.length > 0
+        ? await buildVoucherPdf(rowsFromHistory, deductionOptions, voucherInfo)
+        : data;
+
+    const resolvedUnitRateLabel =
+      rowsFromHistory.length > 0
+        ? buildUnitRateLabelFromRows(rowsFromHistory)
+        : history.unitRateLabel && history.unitRateLabel !== "-"
+          ? history.unitRateLabel
+          : await resolveUnitRateLabelFromHistoryMeta(history.referenceDetail);
+    const fileName =
+      rowsFromHistory.length > 0
+        ? buildVoucherFileName(rowsFromHistory)
+        : buildVoucherDownloadNameFromHistory(history, resolvedUnitRateLabel) ||
+          attachmentPath.split("/").pop() ||
+          "payment-voucher.pdf";
+    const objectUrl = URL.createObjectURL(downloadBlob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
     anchor.download = fileName;
@@ -2385,7 +2836,7 @@ export function PaymentVoucherPage({
                     {history.attachmentUrl ? (
                       <button
                         type="button"
-                        onClick={() => void handleDownloadVoucher(history.attachmentUrl)}
+                        onClick={() => void handleDownloadVoucher(history)}
                         className="inline-flex items-center rounded-md border border-primary/25 px-2 py-1 text-xs text-primary hover:bg-primary/5"
                       >
                         Download PDF

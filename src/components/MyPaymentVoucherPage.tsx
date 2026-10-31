@@ -35,6 +35,7 @@ type VoucherRow = {
   id: string;
   amount: number;
   voucherUrl: string | null;
+  referenceDetail: string | null;
   generatedAt: string;
   details: string;
 };
@@ -54,6 +55,9 @@ type VoucherHistoryMeta = {
   profileIds?: string[];
   componentKeys?: string[];
   salesCaseIds?: string[];
+  memberLabels?: string[];
+  commissionLabels?: string[];
+  unitRateLabels?: string[];
 };
 
 const HISTORY_META_SEPARATOR = "|||META|||";
@@ -88,6 +92,95 @@ const getLocalDateInputValue = (date: Date) => {
 };
 
 const normalizeText = (value: string | null | undefined) => value?.trim().toLowerCase() ?? "";
+
+const sanitizeVoucherFileName = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/[^a-zA-Z0-9._ %,() -]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .trim()
+    .slice(0, 160)
+    .replace(/^[.-]+|[.-]+$/g, "");
+
+type UnitRateRecord = {
+  projectName: string;
+  unitLabel: string;
+  rateLabel: string;
+};
+
+const formatUnitRateRecords = (records: UnitRateRecord[]) => {
+  const dedupedRecords: UnitRateRecord[] = [];
+  const seen = new Set<string>();
+
+  records.forEach((record) => {
+    const projectName = record.projectName.trim() || "-";
+    const unitLabel = record.unitLabel.trim() || "-";
+    const rateLabel = record.rateLabel.trim();
+    const dedupeKey = `${projectName}|||${unitLabel}|||${rateLabel}`;
+
+    if (!rateLabel || rateLabel === "-" || seen.has(dedupeKey)) {
+      return;
+    }
+
+    seen.add(dedupeKey);
+    dedupedRecords.push({ projectName, unitLabel, rateLabel });
+  });
+
+  if (dedupedRecords.length === 0) {
+    return "";
+  }
+
+  const uniqueProjects = Array.from(
+    new Set(dedupedRecords.map((record) => record.projectName).filter((name) => name && name !== "-"))
+  );
+  const singleProject = uniqueProjects.length === 1;
+
+  return dedupedRecords
+    .map((record, index) => {
+      const projectText = record.projectName && record.projectName !== "-" ? record.projectName : "";
+      const unitText = record.unitLabel && record.unitLabel !== "-" ? record.unitLabel : "Unit";
+      const location = singleProject && index > 0 ? unitText : `${projectText} ${unitText}`.trim();
+      return `${location} (${record.rateLabel})`;
+    })
+    .join(", ");
+};
+
+const buildVoucherDownloadName = (row: VoucherRow) => {
+  const meta = parseVoucherHistoryMeta(row.referenceDetail);
+  const memberLabel = Array.from(new Set((meta?.memberLabels ?? []).filter(Boolean))).join(", ") || "Member";
+  const storedUnitRateLabel = Array.from(new Set((meta?.unitRateLabels ?? []).filter(Boolean))).join(", ");
+
+  const detailSegments = row.details
+    .split(";")
+    .map((segment) => segment.split("|")[0]?.trim() || "")
+    .filter(Boolean);
+  const commissionSegments = (meta?.commissionLabels ?? [])
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "-");
+
+  const fallbackRecords = detailSegments
+    .map((segment, index) => {
+      const matched = segment.match(/^(.*?)\s+Unit\s+(.+)$/i);
+      if (!matched) {
+        return null;
+      }
+
+      const rateLabel = commissionSegments[index] ?? (commissionSegments.length === 1 ? commissionSegments[0] : "");
+      return {
+        projectName: matched[1]?.trim() || "-",
+        unitLabel: matched[2]?.trim() || "-",
+        rateLabel,
+      } satisfies UnitRateRecord;
+    })
+    .filter((record): record is UnitRateRecord => Boolean(record));
+
+  const unitRateLabel = storedUnitRateLabel || formatUnitRateRecords(fallbackRecords);
+  const rawName = `Payment Voucher ${memberLabel} ${unitRateLabel}`.trim();
+  return `${sanitizeVoucherFileName(rawName)}.pdf`;
+};
 
 const getStoragePathFromPublicUrl = (publicUrl: string | null) => {
   if (!publicUrl) {
@@ -444,6 +537,7 @@ export function MyPaymentVoucherPage({
           id: entry.id,
           amount,
           voucherUrl,
+          referenceDetail: entry.reference_detail,
           generatedAt: entry.transacted_at || entry.created_at,
           details,
         };
@@ -494,6 +588,7 @@ export function MyPaymentVoucherPage({
         id: voucherUrl || voucherKey,
         amount: grossAmount,
         voucherUrl,
+        referenceDetail: null,
         generatedAt,
         details: detailLabels.join("; "),
       };
@@ -530,7 +625,9 @@ export function MyPaymentVoucherPage({
 
   const totalAmount = filteredRows.reduce((sum, row) => sum + row.amount, 0);
 
-  const handleDownloadVoucher = async (attachmentUrl: string | null) => {
+  const handleDownloadVoucher = async (row: VoucherRow) => {
+    const attachmentUrl = row.voucherUrl;
+
     if (!attachmentUrl) {
       return;
     }
@@ -551,7 +648,7 @@ export function MyPaymentVoucherPage({
       return;
     }
 
-    const fileName = attachmentPath.split("/").pop() || "payment-voucher.pdf";
+    const fileName = buildVoucherDownloadName(row) || attachmentPath.split("/").pop() || "payment-voucher.pdf";
     const objectUrl = URL.createObjectURL(data);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
@@ -645,7 +742,7 @@ export function MyPaymentVoucherPage({
                       {row.voucherUrl ? (
                         <button
                           type="button"
-                          onClick={() => void handleDownloadVoucher(row.voucherUrl)}
+                          onClick={() => void handleDownloadVoucher(row)}
                           className="inline-flex items-center rounded-md border border-primary/25 px-2 py-1 text-xs text-primary hover:bg-primary/5"
                         >
                           Download PDF
