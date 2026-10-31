@@ -97,8 +97,9 @@ const sanitizeVoucherFileName = (value: string) =>
   value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/%/g, " pct")
     .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/[^a-zA-Z0-9._ %,() -]+/g, " ")
+    .replace(/[^a-zA-Z0-9._ -]+/g, " ")
     .replace(/\s+/g, " ")
     .replace(/-+/g, "-")
     .trim()

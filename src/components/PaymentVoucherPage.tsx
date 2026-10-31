@@ -111,6 +111,17 @@ const PAYMENT_EPSILON = 0.009;
 
 const HISTORY_META_SEPARATOR = "|||META|||";
 
+const getReadableLoadError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : "";
+  const normalized = message.trim().toLowerCase();
+
+  if (!normalized || normalized === "load failed" || normalized.includes("failed to fetch")) {
+    return "Unable to load payment voucher data. Please refresh and try again.";
+  }
+
+  return message;
+};
+
 const formatAmount = (value: number) => {
   const roundedValue = Number(value.toFixed(2));
 
@@ -353,7 +364,20 @@ const deriveGrossAmountFromHistory = (finalAmount: number, referenceDetail: stri
   return Number(finalAmount.toFixed(2));
 };
 
-const sanitizeVoucherFileName = (value: string) =>
+const sanitizeVoucherStorageFileName = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/%/g, " pct")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/[^a-zA-Z0-9._ -]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .trim()
+    .slice(0, 160)
+    .replace(/^[.-]+|[.-]+$/g, "");
+
+const sanitizeVoucherDownloadFileName = (value: string) =>
   value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -428,12 +452,20 @@ const buildUnitRateLabelFromRows = (rows: VoucherBreakdownRow[]) =>
     }))
   );
 
-const buildVoucherFileName = (rows: VoucherBreakdownRow[]) => {
+const buildVoucherStorageFileName = (rows: VoucherBreakdownRow[]) => {
   const memberLabel = rows[0]?.memberLabel || "Member";
   const unitRateLabel = buildUnitRateLabelFromRows(rows);
   const rawName = `Payment Voucher ${memberLabel} ${unitRateLabel}`.trim();
 
-  return `${sanitizeVoucherFileName(rawName)}.pdf`;
+  return `${sanitizeVoucherStorageFileName(rawName)}.pdf`;
+};
+
+const buildVoucherDownloadFileName = (rows: VoucherBreakdownRow[]) => {
+  const memberLabel = rows[0]?.memberLabel || "Member";
+  const unitRateLabel = buildUnitRateLabelFromRows(rows);
+  const rawName = `Payment Voucher ${memberLabel} ${unitRateLabel}`.trim();
+
+  return `${sanitizeVoucherDownloadFileName(rawName)}.pdf`;
 };
 
 const buildVoucherDownloadNameFromHistory = (history: VoucherHistoryDisplayRow, resolvedUnitRateLabel?: string) => {
@@ -509,7 +541,7 @@ const buildVoucherDownloadNameFromHistory = (history: VoucherHistoryDisplayRow, 
   const rawName = detailSegment
     ? `Payment Voucher ${memberSegment} ${detailSegment}`
     : `Payment Voucher ${memberSegment} ${fallbackDetailSegment || ""} ${fallbackCommissionSegment}`.trim();
-  return `${sanitizeVoucherFileName(rawName)}.pdf`;
+  return `${sanitizeVoucherDownloadFileName(rawName)}.pdf`;
 };
 
 const resolveUnitRateLabelFromHistoryMeta = async (referenceDetail: string | null | undefined) => {
@@ -623,7 +655,7 @@ const getVoucherClaimHeading = (row: VoucherBreakdownRow) => {
 };
 
 const buildUniqueVoucherPath = (userId: string, rows: VoucherBreakdownRow[]) => {
-  const baseFileName = buildVoucherFileName(rows);
+  const baseFileName = buildVoucherStorageFileName(rows);
   const timestamp = new Date().toISOString().replace(/[.:]/g, "-");
   const randomSuffix = Math.random().toString(36).slice(2, 10);
 
@@ -792,121 +824,135 @@ export function PaymentVoucherPage({
 
   const fetchData = async () => {
     setError(null);
+    try {
 
-    if (!canGenerateVoucher) {
-      const { data: voucherData, error: voucherError } = await supabase
-        .from("finance_entries")
-        .select("id, amount, attachment_url, reference_label, reference_detail, transacted_at, created_at")
-        .eq("description", "Payment voucher generated")
-        .order("created_at", { ascending: false });
+      if (!canGenerateVoucher) {
+        const { data: voucherData, error: voucherError } = await supabase
+          .from("finance_entries")
+          .select("id, amount, attachment_url, reference_label, reference_detail, transacted_at, created_at")
+          .eq("description", "Payment voucher generated")
+          .order("created_at", { ascending: false });
+
+        if (voucherError) {
+          setError(voucherError.message);
+          return;
+        }
+
+        setVoucherHistory((voucherData as VoucherHistoryEntry[]) ?? []);
+        setPayouts([]);
+        setCases([]);
+        setProjects([]);
+        setProfiles([]);
+        return;
+      }
+
+      const [{ data: voucherData, error: voucherError }, approvedPayoutResult] =
+        await Promise.all([
+          supabase
+            .from("finance_entries")
+            .select("id, amount, attachment_url, reference_label, reference_detail, transacted_at, created_at")
+            .eq("description", "Payment voucher generated")
+            .order("created_at", { ascending: false }),
+          fetchApprovedPayoutRows(),
+        ]);
+
+      if (approvedPayoutResult.error) {
+        setError(approvedPayoutResult.error);
+        return;
+      }
 
       if (voucherError) {
         setError(voucherError.message);
         return;
       }
 
-      setVoucherHistory((voucherData as VoucherHistoryEntry[]) ?? []);
-      setPayouts([]);
-      setCases([]);
-      setProjects([]);
-      setProfiles([]);
-      return;
-    }
+      const nextPayouts = approvedPayoutResult.rows;
+      const nextVoucherHistory = (voucherData as VoucherHistoryEntry[]) ?? [];
 
-    const [{ data: voucherData, error: voucherError }, approvedPayoutResult] =
-      await Promise.all([
-        supabase
-          .from("finance_entries")
-          .select("id, amount, attachment_url, reference_label, reference_detail, transacted_at, created_at")
-          .eq("description", "Payment voucher generated")
-          .order("created_at", { ascending: false }),
-        fetchApprovedPayoutRows(),
-      ]);
+      const { data: payoutDataNeedingReceipt, error: payoutDataNeedingReceiptError } = await supabase
+        .from("sales_case_payouts")
+        .select("id, payment_receipt_url")
+        .in("payout_type", ["standard", "tier_upgrade_top_up"])
+        .in("payout_status", ["Pending", "Approve", "Paid"])
+        .is("payment_receipt_url", null);
 
-    if (approvedPayoutResult.error) {
-      setError(approvedPayoutResult.error);
-      return;
-    }
+      if (!payoutDataNeedingReceiptError && payoutDataNeedingReceipt) {
+        const payoutUrlMap = new Map<string, string>();
+        nextVoucherHistory.forEach((historyEntry) => {
+          const meta = parseVoucherHistoryMeta(historyEntry.reference_detail);
+          const attachmentUrl = historyEntry.attachment_url;
 
-    if (voucherError) {
-      setError(voucherError.message);
-      return;
-    }
+          if (!attachmentUrl) {
+            return;
+          }
 
-    const nextPayouts = approvedPayoutResult.rows;
-    const nextVoucherHistory = (voucherData as VoucherHistoryEntry[]) ?? [];
+          (meta?.payoutIds ?? []).forEach((payoutId) => {
+            if (payoutId) {
+              payoutUrlMap.set(payoutId, attachmentUrl);
+            }
+          });
 
-    const { data: payoutDataNeedingReceipt, error: payoutDataNeedingReceiptError } = await supabase
-      .from("sales_case_payouts")
-      .select("id, payment_receipt_url")
-      .in("payout_type", ["standard", "tier_upgrade_top_up"])
-      .in("payout_status", ["Pending", "Approve", "Paid"])
-      .is("payment_receipt_url", null);
+          (meta?.componentKeys ?? []).forEach((componentKey) => {
+            const payoutId = getPayoutIdFromComponentKey(componentKey);
 
-    if (!payoutDataNeedingReceiptError && payoutDataNeedingReceipt) {
-      const payoutUrlMap = new Map<string, string>();
-      nextVoucherHistory.forEach((historyEntry) => {
-        const meta = parseVoucherHistoryMeta(historyEntry.reference_detail);
-        const attachmentUrl = historyEntry.attachment_url;
+            if (payoutId) {
+              payoutUrlMap.set(payoutId, attachmentUrl);
+            }
+          });
+        });
 
-        if (!attachmentUrl) {
-          return;
+        const missingRows = (payoutDataNeedingReceipt as Array<{ id: string; payment_receipt_url: string | null }>)
+          .filter((row) => !row.payment_receipt_url && payoutUrlMap.has(row.id));
+
+        if (missingRows.length > 0) {
+          const linkErrors: string[] = [];
+
+          for (const row of missingRows) {
+            try {
+              const { error: updateError } = await supabase
+                .from("sales_case_payouts")
+                .update({ payment_receipt_url: payoutUrlMap.get(row.id) ?? null })
+                .eq("id", row.id);
+
+              if (updateError) {
+                linkErrors.push(`${row.id}: ${updateError.message}`);
+              }
+            } catch (linkError) {
+              const message = linkError instanceof Error ? linkError.message : "Unknown error";
+              linkErrors.push(`${row.id}: ${message}`);
+            }
+          }
+
+          if (linkErrors.length > 0) {
+            console.error("Unable to link some payout receipts from voucher history", linkErrors);
+          }
         }
-
-        (meta?.payoutIds ?? []).forEach((payoutId) => {
-          if (payoutId) {
-            payoutUrlMap.set(payoutId, attachmentUrl);
-          }
-        });
-
-        (meta?.componentKeys ?? []).forEach((componentKey) => {
-          const payoutId = getPayoutIdFromComponentKey(componentKey);
-
-          if (payoutId) {
-            payoutUrlMap.set(payoutId, attachmentUrl);
-          }
-        });
-      });
-
-      const missingRows = (payoutDataNeedingReceipt as Array<{ id: string; payment_receipt_url: string | null }>)
-        .filter((row) => !row.payment_receipt_url && payoutUrlMap.has(row.id));
-
-      if (missingRows.length > 0) {
-        await Promise.all(
-          missingRows.map((row) =>
-            supabase
-              .from("sales_case_payouts")
-              .update({ payment_receipt_url: payoutUrlMap.get(row.id) ?? null })
-              .eq("id", row.id)
-          )
-        );
       }
-    }
 
-    setPayouts(nextPayouts);
-    setVoucherHistory(nextVoucherHistory);
+      setPayouts(nextPayouts);
+      setVoucherHistory(nextVoucherHistory);
 
-    const payoutSalesCaseIds = nextPayouts.map((row) => row.sales_case_id);
-    const historySalesCaseIds = nextVoucherHistory.flatMap((entry) => parseVoucherHistoryDetail(entry.reference_detail).salesCaseIds);
-    const salesCaseIds = Array.from(new Set([...payoutSalesCaseIds, ...historySalesCaseIds].filter(Boolean)));
-    const profileIds = Array.from(new Set(nextPayouts.map((row) => row.profile_id)));
+      const payoutSalesCaseIds = nextPayouts.map((row) => row.sales_case_id);
+      const historySalesCaseIds = nextVoucherHistory.flatMap((entry) => parseVoucherHistoryDetail(entry.reference_detail).salesCaseIds);
+      const salesCaseIds = Array.from(new Set([...payoutSalesCaseIds, ...historySalesCaseIds].filter(Boolean)));
+      const profileIds = Array.from(new Set(nextPayouts.map((row) => row.profile_id)));
 
-    if (salesCaseIds.length === 0) {
-      setCases([]);
-      setProjects([]);
-      setProfiles([]);
-      return;
-    }
+      if (salesCaseIds.length === 0) {
+        setCases([]);
+        setProjects([]);
+        setProfiles([]);
+        return;
+      }
 
-    const { data: caseData, error: caseError } = await supabase
-      .from("sales_cases")
-      .select("*")
-      .in("id", salesCaseIds);
+      const { data: caseData, error: caseError } = await supabase
+        .from("sales_cases")
+        .select("*")
+        .in("id", salesCaseIds);
 
-    let profileData: ProfileOption[] = [];
-    let profileError: string | null = null;
+      let profileData: ProfileOption[] = [];
+      let profileError: string | null = null;
 
-    if (profileIds.length > 0) {
+      if (profileIds.length > 0) {
       const fullProfileResult = await supabase
         .from("profiles")
         .select("id, name, email, ic_no, bank_name, bank_account_number")
@@ -964,40 +1010,44 @@ export function PaymentVoucherPage({
       }
     }
 
-    if (caseError) {
-      setError(caseError.message);
-      return;
+      if (caseError) {
+        setError(caseError.message);
+        return;
+      }
+
+      if (profileError) {
+        setError(profileError);
+        return;
+      }
+
+      const nextCases = (caseData as SalesCaseRecord[]) ?? [];
+      setCases(nextCases);
+      setProfiles(profileData);
+
+      const projectIds = Array.from(new Set(nextCases.map((record) => record.project_id).filter(Boolean))) as string[];
+
+      if (projectIds.length === 0) {
+        setProjects([]);
+        return;
+      }
+
+      const { data: projectData, error: projectError } = await supabase
+        .from("projects")
+        .select(
+          "id, project_name, company_commission, agent_commission, pre_leader_override, leader_override, direct_commission, holding_commission, commission_structures, default_commission_structure_id"
+        )
+        .in("id", projectIds);
+
+      if (projectError) {
+        setError(projectError.message);
+        return;
+      }
+
+      setProjects((projectData as ProjectOption[]) ?? []);
+    } catch (loadError) {
+      console.error("Failed to load payment voucher data", loadError);
+      setError(getReadableLoadError(loadError));
     }
-
-    if (profileError) {
-      setError(profileError);
-      return;
-    }
-
-    const nextCases = (caseData as SalesCaseRecord[]) ?? [];
-    setCases(nextCases);
-    setProfiles(profileData);
-
-    const projectIds = Array.from(new Set(nextCases.map((record) => record.project_id).filter(Boolean))) as string[];
-
-    if (projectIds.length === 0) {
-      setProjects([]);
-      return;
-    }
-
-    const { data: projectData, error: projectError } = await supabase
-      .from("projects")
-      .select(
-        "id, project_name, company_commission, agent_commission, pre_leader_override, leader_override, direct_commission, holding_commission, commission_structures, default_commission_structure_id"
-      )
-      .in("id", projectIds);
-
-    if (projectError) {
-      setError(projectError.message);
-      return;
-    }
-
-    setProjects((projectData as ProjectOption[]) ?? []);
   };
 
   useEffect(() => {
@@ -2466,7 +2516,7 @@ export function PaymentVoucherPage({
           : await resolveUnitRateLabelFromHistoryMeta(history.referenceDetail);
     const fileName =
       rowsFromHistory.length > 0
-        ? buildVoucherFileName(rowsFromHistory)
+        ? buildVoucherDownloadFileName(rowsFromHistory)
         : buildVoucherDownloadNameFromHistory(history, resolvedUnitRateLabel) ||
           attachmentPath.split("/").pop() ||
           "payment-voucher.pdf";
@@ -2824,7 +2874,11 @@ export function PaymentVoucherPage({
                 <th className="px-4 py-3">Voucher</th>
                 <th className="px-4 py-3">Amount (RM)</th>
                 <th className="px-4 py-3">Details</th>
-                {canGenerateVoucher && <th className="px-4 py-3 text-right">Action</th>}
+                {canGenerateVoucher && (
+                  <th className="sticky right-0 z-20 bg-white px-4 py-3 text-right shadow-[-8px_0_8px_-8px_rgba(15,23,42,0.18)]">
+                    Action
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -2848,7 +2902,7 @@ export function PaymentVoucherPage({
                   <td className="px-4 py-3 text-gray-700">{formatAmount(history.amount)}</td>
                   <td className="px-4 py-3 text-gray-700">{history.detailsLabel}</td>
                   {canGenerateVoucher && (
-                    <td className="px-4 py-3 text-right">
+                    <td className="sticky right-0 z-10 bg-white px-4 py-3 text-right shadow-[-8px_0_8px_-8px_rgba(15,23,42,0.18)]">
                       <button
                         type="button"
                         onClick={() => {
