@@ -889,9 +889,8 @@ export function ManageCases({ userId }: ManageCasesProps) {
                 <th className="px-6 py-2">SPA Price (RM)</th>
                 <th className="px-6 py-2">Nett Price (RM)</th>
                 <th className="px-6 py-2">Created By</th>
-                <th className="px-6 py-2">Booking Form</th>
                 <th className="px-6 py-2">Case Status</th>
-                <th className="px-6 py-2 text-right">Actions</th>
+                <th className="px-6 py-2">Actions</th>
                 <th className="px-6 py-2">Delete Request</th>
                 <th className="px-6 py-2">Edited</th>
                 <th className="px-6 py-2">Reviewed</th>
@@ -966,7 +965,24 @@ export function ManageCases({ userId }: ManageCasesProps) {
                     </td>
                     <td className="px-6 py-3 text-gray-600">
                       <div className="font-medium text-gray-800">{projectName}</div>
-                      <div className="text-xs text-gray-500">{record.unit_number ? `Unit ${record.unit_number}` : "Unit -"}</div>
+                      <div className="text-xs text-gray-500">
+                        {record.unit_number ? (
+                          record.booking_form_url ? (
+                            <a
+                              href={record.booking_form_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              Unit {record.unit_number}
+                            </a>
+                          ) : (
+                            `Unit ${record.unit_number}`
+                          )
+                        ) : (
+                          "Unit -"
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-3 text-gray-600">{formatAmount(record.spa_price)}</td>
                     <td className="px-6 py-3 text-gray-600">
@@ -974,20 +990,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
                       <div className="text-xs text-gray-500">{nettPriceRemark}</div>
                     </td>
                     <td className="px-6 py-3 text-gray-600">{creator}</td>
-                    <td className="px-6 py-3 text-gray-600">
-                      {record.booking_form_url ? (
-                        <a
-                          href={record.booking_form_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-primary hover:underline"
-                        >
-                          View PDF
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
                     <td className="px-6 py-3 text-gray-600">
                       <span
                         className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getCaseStatusClasses(displayStatus)}`}
@@ -1001,7 +1003,32 @@ export function ManageCases({ userId }: ManageCasesProps) {
                       </div>
                     </td>
                     <td className="px-6 py-3">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex flex-col items-start gap-1">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCase(record);
+                              // Admin/super admin can always edit workflow fields, including Signed SPA status.
+                              setIsReadOnlyModal(false);
+                              setIsModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 text-gray-600 hover:text-gray-900"
+                          >
+                            <Pencil className="h-3 w-3" />
+                            Edit
+                          </button>
+                          {needsReview && (
+                            <button
+                              type="button"
+                              onClick={() => handleNoted(record)}
+                              disabled={isNotingId === record.id}
+                              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-amber-200 text-amber-700 hover:text-amber-800 disabled:opacity-60"
+                            >
+                              {isNotingId === record.id ? "Noting..." : "Noted"}
+                            </button>
+                          )}
+                        </div>
                         {status === "Claimable" && !record.commission_review_sent_at && (
                           <button
                             type="button"
@@ -1017,29 +1044,6 @@ export function ManageCases({ userId }: ManageCasesProps) {
                             Sent to Cases Approval
                           </span>
                         )}
-                        {needsReview && (
-                          <button
-                            type="button"
-                            onClick={() => handleNoted(record)}
-                            disabled={isNotingId === record.id}
-                            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-amber-200 text-amber-700 hover:text-amber-800 disabled:opacity-60"
-                          >
-                            {isNotingId === record.id ? "Noting..." : "Noted"}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingCase(record);
-                            // Admin/super admin can always edit workflow fields, including Signed SPA status.
-                            setIsReadOnlyModal(false);
-                            setIsModalOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 text-gray-600 hover:text-gray-900"
-                        >
-                          <Pencil className="h-3 w-3" />
-                          Edit
-                        </button>
                       </div>
                     </td>
                     <td className="px-6 py-3 text-gray-600">
@@ -1081,7 +1085,7 @@ export function ManageCases({ userId }: ManageCasesProps) {
               })}
               {filteredCases.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="py-6 text-center text-gray-500">
+                  <td colSpan={11} className="py-6 text-center text-gray-500">
                     No cases found.
                   </td>
                 </tr>
