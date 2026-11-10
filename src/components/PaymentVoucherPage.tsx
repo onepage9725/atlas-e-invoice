@@ -30,6 +30,7 @@ type VoucherBreakdownRow = {
   amount: number;
   isHoldingComm: boolean;
   componentCategory: "claim" | "override";
+  paymentRemark: string;
 };
 
 type VoucherComponentBreakdown = {
@@ -646,12 +647,25 @@ const resolveUnitRateLabelFromHistoryMeta = async (referenceDetail: string | nul
   return formatUnitRateRecords(unitRateRecords);
 };
 
+const getVoucherSectionOrder = (row: VoucherBreakdownRow) => {
+  if (row.componentCategory === "override") {
+    return 1;
+  }
+
+  return row.isHoldingComm ? 2 : 0;
+};
+
 const getVoucherClaimHeading = (row: VoucherBreakdownRow) => {
   if (row.componentCategory === "override") {
     return "Overriding:";
   }
 
-  return row.isHoldingComm ? "3rd Claim for Stage 2A:" : "LO Signed Claim:";
+  if (row.isHoldingComm) {
+    return "3rd Claim for Stage 2A:";
+  }
+
+  const normalizedRemark = row.paymentRemark.replace(/:\s*$/, "").trim();
+  return normalizedRemark ? `${normalizedRemark}:` : "LO Signed Claim:";
 };
 
 const buildUniqueVoucherPath = (userId: string, rows: VoucherBreakdownRow[]) => {
@@ -1155,6 +1169,7 @@ export function PaymentVoucherPage({
         amount: payout.total_amount,
         isHoldingComm: isReleasedHoldingPayout(payout),
         componentCategory: "claim",
+        paymentRemark: "",
       });
 
       existing.totalAmount += payout.total_amount;
@@ -1731,15 +1746,7 @@ export function PaymentVoucherPage({
     doc.setFontSize(11);
 
     const rowsForPdf = [...rows].sort((left, right) => {
-      const leftHeading = getVoucherClaimHeading(left);
-      const rightHeading = getVoucherClaimHeading(right);
-      const sectionOrder: Record<string, number> = {
-        "LO Signed Claim:": 0,
-        "Overriding:": 1,
-        "3rd Claim for Stage 2A:": 2,
-      };
-
-      const headingDelta = (sectionOrder[leftHeading] ?? 99) - (sectionOrder[rightHeading] ?? 99);
+      const headingDelta = getVoucherSectionOrder(left) - getVoucherSectionOrder(right);
       if (headingDelta !== 0) {
         return headingDelta;
       }
@@ -1941,6 +1948,7 @@ export function PaymentVoucherPage({
         commissionPercentage: releasePercentage,
         amount: matchedPayment ? matchedPayment.amount : component.amount,
         componentCategory: component.componentCategory,
+        paymentRemark: matchedPayment?.remark ?? "",
       };
     });
 
@@ -2455,6 +2463,7 @@ export function PaymentVoucherPage({
                   amount: Number(componentPayment.amount ?? payout.total_amount),
                   isHoldingComm: isReleasedHoldingPayout(payout),
                   componentCategory,
+                  paymentRemark: (componentPayment.remark ?? "").trim(),
                 } satisfies VoucherBreakdownRow;
               })
             : (payoutRows as SalesCasePayoutRecord[]).map((payout) => {
@@ -2484,6 +2493,7 @@ export function PaymentVoucherPage({
                   amount: Number(payout.total_amount ?? 0),
                   isHoldingComm: isReleasedHoldingPayout(payout),
                   componentCategory: "claim",
+                  paymentRemark: "",
                 } satisfies VoucherBreakdownRow;
               });
 
